@@ -1,0 +1,52 @@
+import { Product } from "@/types";
+
+export const products: Product[] = [
+  {
+    id: "1",
+    name: "Premium Dog Food",
+    price: 34.99,
+    image: "/api/placeholder/400/400",
+    description: "Nutrient-rich kibble for adult dogs. Made with real chicken and vegetables for a balanced diet.",
+    category: "Food",
+  },
+  {
+    id: "2",
+    name: "Organic Cat Treats",
+    price: 12.99,
+    image: "/api/placeholder/400/400",
+    description: "Grain-free, single-ingredient treats. Perfect for training or rewarding your feline friend.",
+    category: "Treats",
+  },
+  {
+    id: "3",
+    name: "Cozy Pet Bed",
+    price: 49.99,
+    image: "/api/placeholder/400/400",
+    description: "Soft, washable bed with orthopedic foam. Suitable for dogs and cats up to 25 lbs.",
+    category: "Bedding",
+  },
+  {
+    id: "4",
+    name: "Durable Chew Toy",
+    price: 14.99,
+    image: "/api/placeholder/400/400",
+    description: "Tough rubber toy designed for heavy chewers. Helps clean teeth and satisfy chewing instincts.",
+    category: "Toys",
+  },
+  {
+    id: "5",
+    name: "Grooming Brush Set",
+    price: 22.99,
+    image: "/api/placeholder/400/400",
+    description: "Three-brush set for all coat types. Reduces shedding and keeps fur tangle-free.",
+    category: "Grooming",
+  },
+  {
+    id: "6",
+    name: "Natural Flea Collar",
+    price: 18.99,
+    image: "/api/placeholder/400/400",
+    description: "Plant-based flea and tick protection. Long-lasting, odor-free, and vet recommended.",
+    category: "Health",
+  },
+];
