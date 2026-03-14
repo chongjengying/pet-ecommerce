@@ -20,7 +20,7 @@
   --color-terracotta-light: var(--terracotta-light);
   --color-sage: var(--sage);
   --color-sage-light: var(--sage-light);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-dm-sans), system-ui, sans-serif;
   --font-mono: var(--font-geist-mono);
 }
 
