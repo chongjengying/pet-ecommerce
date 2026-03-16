@@ -1,4 +1,6 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+## Pet_E-commerce
+
+A pet platform that provides service booking and sells pet products such as food, snacks, and accessories.
 
 ## Getting Started
 
