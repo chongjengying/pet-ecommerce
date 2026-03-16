@@ -2,17 +2,6 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-### Environment variables (not committed)
-
-Create a `.env.local` file in the project root with your Supabase credentials (get them from [Supabase Dashboard](https://supabase.com/dashboard) → Project Settings → API):
-
-- `NEXT_PUBLIC_SUPABASE_URL` – your project URL  
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY` – your anon or publishable key  
-
-These files are in `.gitignore` and will **not** be pushed to GitHub: `.env`, `.env.local`, `.env.*.local`, `.env.local.example`.
-
-### Run the app
-
 First, run the development server:
 
 ```bash

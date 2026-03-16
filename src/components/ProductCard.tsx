@@ -9,10 +9,20 @@ interface ProductCardProps {
   product: Product;
 }
 
+function getStock(product: Product): number | undefined {
+  if (product.stock == null) return undefined;
+  const n = Number(product.stock);
+  return Number.isNaN(n) ? undefined : n;
+}
+
 export default function ProductCard({ product }: ProductCardProps) {
-  const { addToCart } = useCart();
+  const { addToCart, items } = useCart();
   const imageUrl =
     product.image ?? product.image_url ?? `https://picsum.photos/400/400?random=${product.id}`;
+  const baseStock = getStock(product);
+  const cartQty = items.find((i) => String(i.id) === String(product.id))?.quantity ?? 0;
+  const stock = baseStock !== undefined ? Math.max(0, baseStock - cartQty) : undefined;
+  const outOfStock = stock !== undefined && stock <= 0;
 
   return (
     <article className="flex h-full flex-col overflow-hidden rounded-2xl border border-amber-200/60 bg-white shadow-sm transition hover:shadow-md">
@@ -37,8 +47,19 @@ export default function ProductCard({ product }: ProductCardProps) {
             {product.description ?? ""}
           </p>
           <p className="mt-auto pt-3 text-lg font-bold text-terracotta">
-            ${Number(product.price).toFixed(2)}
+            RM{Number(product.price).toFixed(2)}
           </p>
+          {stock !== undefined && (
+            <p className="mt-1 text-sm text-umber/70">
+              {outOfStock ? (
+                <span className="font-medium text-red-600">Out of stock</span>
+              ) : stock <= 5 ? (
+                <span>Only {stock} left</span>
+              ) : (
+                <span className="text-sage">{stock} in stock</span>
+              )}
+            </p>
+          )}
         </div>
       </Link>
       <div className="border-t border-amber-100 p-4">
@@ -46,11 +67,12 @@ export default function ProductCard({ product }: ProductCardProps) {
           type="button"
           onClick={(e) => {
             e.preventDefault();
-            addToCart({ ...product, image: imageUrl, category: product.category ?? "" });
+            if (!outOfStock) addToCart({ ...product, image: imageUrl, category: product.category ?? "" });
           }}
-          className="w-full rounded-xl bg-terracotta py-2.5 text-sm font-semibold text-white transition hover:bg-terracotta/90"
+          disabled={outOfStock}
+          className="w-full rounded-xl bg-terracotta py-2.5 text-sm font-semibold text-white transition hover:bg-terracotta/90 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-terracotta"
         >
-          Add to cart
+          {outOfStock ? "Out of stock" : "Add to cart"}
         </button>
       </div>
     </article>

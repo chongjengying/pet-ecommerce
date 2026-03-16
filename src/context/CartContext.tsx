@@ -18,6 +18,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);
 
   const addToCart = useCallback((product: Product, quantity = 1) => {
+    if (quantity <= 0) return;
     setItems((prev) => {
       const existing = prev.find((i) => i.id === product.id);
       if (existing) {

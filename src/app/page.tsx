@@ -20,6 +20,12 @@ export default function Home() {
               Shop products
             </Link>
             <Link
+              href="/test-db"
+              className="rounded-full bg-terracotta px-6 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-terracotta/90"
+            >
+             test
+            </Link>
+            <Link
               href="/grooming"
               className="rounded-full border-2 border-umber/20 bg-white px-6 py-3 text-sm font-semibold text-umber transition hover:border-umber/40 hover:bg-amber-50"
             >

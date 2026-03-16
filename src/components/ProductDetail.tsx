@@ -10,13 +10,27 @@ interface ProductDetailProps {
   product: Product;
 }
 
+function getStock(product: Product): number | undefined {
+  if (product.stock == null) return undefined;
+  const n = Number(product.stock);
+  return Number.isNaN(n) ? undefined : n;
+}
+
 export default function ProductDetail({ product }: ProductDetailProps) {
-  const { addToCart } = useCart();
+  const { addToCart, items } = useCart();
   const [quantity, setQuantity] = useState(1);
   const [added, setAdded] = useState(false);
 
+  const baseStock = getStock(product);
+  const cartQty = items.find((i) => String(i.id) === String(product.id))?.quantity ?? 0;
+  const stock = baseStock !== undefined ? Math.max(0, baseStock - cartQty) : undefined;
+  const outOfStock = stock !== undefined && stock <= 0;
+  const maxQty = stock !== undefined ? Math.max(0, stock) : undefined;
+  const effectiveQty = maxQty !== undefined ? Math.min(quantity, maxQty) : quantity;
+
   const handleAddToCart = () => {
-    addToCart(product, quantity);
+    if (outOfStock || effectiveQty <= 0) return;
+    addToCart(product, effectiveQty);
     setAdded(true);
     setTimeout(() => setAdded(false), 2000);
   };
@@ -51,8 +65,19 @@ export default function ProductDetail({ product }: ProductDetailProps) {
               {product.name}
             </h1>
             <p className="mt-4 text-2xl font-bold text-terracotta">
-              ${Number(product.price ?? 0).toFixed(2)}
+              RM{Number(product.price ?? 0).toFixed(2)}
             </p>
+            {stock !== undefined && (
+              <p className="mt-2 text-sm text-umber/70">
+                {outOfStock ? (
+                  <span className="font-medium text-red-600">Out of stock</span>
+                ) : stock <= 5 ? (
+                  <span>Only {stock} left in stock</span>
+                ) : (
+                  <span className="text-sage">{stock} in stock</span>
+                )}
+              </p>
+            )}
             {product.description != null && (
               <p className="mt-6 text-umber/80">{product.description}</p>
             )}
@@ -69,7 +94,9 @@ export default function ProductDetail({ product }: ProductDetailProps) {
                 <span className="w-12 text-center font-medium">{quantity}</span>
                 <button
                   type="button"
-                  onClick={() => setQuantity((q) => q + 1)}
+                  onClick={() =>
+                    setQuantity((q) => (maxQty !== undefined ? Math.min(q + 1, maxQty) : q + 1))
+                  }
                   className="flex h-11 w-11 items-center justify-center text-umber hover:bg-amber-50"
                   aria-label="Increase quantity"
                 >
@@ -79,9 +106,10 @@ export default function ProductDetail({ product }: ProductDetailProps) {
               <button
                 type="button"
                 onClick={handleAddToCart}
-                className="rounded-xl bg-terracotta px-8 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-terracotta/90 disabled:opacity-70"
+                disabled={outOfStock || (maxQty !== undefined && quantity > maxQty)}
+                className="rounded-xl bg-terracotta px-8 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-terracotta/90 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-terracotta"
               >
-                {added ? "Added to cart ✓" : "Add to cart"}
+                {outOfStock ? "Out of stock" : added ? "Added to cart ✓" : "Add to cart"}
               </button>
             </div>
             <Link
