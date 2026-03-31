@@ -19,7 +19,12 @@ export default function CartPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          items: items.map((i) => ({ id: i.id, quantity: i.quantity })),
+          items: items.map((i) => ({
+            id: i.id,
+            quantity: i.quantity,
+            name: i.name,
+            price: i.price,
+          })),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -41,9 +46,9 @@ export default function CartPage() {
   if (cartCount === 0) {
     return (
       <div className="bg-cream">
-        <div className="mx-auto max-w-2xl px-4 py-16 text-center sm:px-6">
+        <div className="mx-auto max-w-2xl px-4 py-16 sm:px-6">
           {checkoutSuccess ? (
-            <>
+            <div className="text-center">
               <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-sage/20 text-sage">
                 <svg className="h-10 w-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -51,24 +56,33 @@ export default function CartPage() {
               </div>
               <h2 className="mt-4 text-2xl font-bold text-umber">Thank you!</h2>
               <p className="mt-2 text-umber/70">Your order has been placed and stock has been updated.</p>
-            </>
+              <Link
+                href="/products"
+                className="mt-8 inline-block rounded-xl bg-terracotta px-6 py-3 text-sm font-semibold text-white hover:bg-terracotta/90"
+              >
+                Continue Shopping
+              </Link>
+            </div>
           ) : (
-            <>
-              <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-amber-100 text-terracotta">
-                <svg className="h-10 w-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
-                </svg>
+            <div className="rounded-2xl border border-amber-200/60 bg-white p-8 shadow-sm">
+              <h1 className="text-xl font-bold text-umber sm:text-2xl">Shopping Cart (0)</h1>
+              <div className="mt-10 flex flex-col items-center justify-center text-center">
+                <div className="flex h-24 w-24 items-center justify-center rounded-full bg-amber-50 text-umber/60">
+                  <svg className="h-14 w-14" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.25}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                </div>
+                <p className="mt-6 text-lg font-bold text-umber">Your cart is currently empty!</p>
+                <p className="mt-2 text-sm text-umber/70">You may check out all the available products and buy some in the shop.</p>
+                <Link
+                  href="/products"
+                  className="mt-8 w-full max-w-xs rounded-xl bg-umber px-6 py-3.5 text-center text-sm font-semibold text-white hover:bg-umber/90 sm:w-auto"
+                >
+                  Continue Shopping
+                </Link>
               </div>
-              <h2 className="mt-4 text-2xl font-bold text-umber">Your cart is empty</h2>
-              <p className="mt-2 text-umber/70">Add some products and come back.</p>
-            </>
+            </div>
           )}
-          <Link
-            href="/products"
-            className="mt-8 inline-block rounded-xl bg-terracotta px-6 py-3 text-sm font-semibold text-white hover:bg-terracotta/90"
-          >
-            Shop products
-          </Link>
         </div>
       </div>
     );
@@ -88,36 +102,38 @@ export default function CartPage() {
             >
               <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-xl bg-amber-50 sm:h-28 sm:w-28">
                 <Image
-                  src={`https://picsum.photos/200/200?random=${item.id}`}
+                  src={item.image ?? item.image_url ?? `https://picsum.photos/200/200?random=${item.id}`}
                   alt={item.name}
                   fill
+                  unoptimized
                   className="object-cover"
                 />
               </div>
               <div className="min-w-0 flex-1">
                 <h3 className="font-semibold text-umber">{item.name}</h3>
-                <p className="text-sm text-umber/70">${item.price.toFixed(2)} each</p>
+                <p className="text-sm text-umber/70">RM{item.price.toFixed(2)} each</p>
                 <div className="mt-2 flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => updateQuantity(item.id, item.quantity - 1)}
+                    onClick={() => updateQuantity(String(item.id), item.quantity - 1)}
                     className="flex h-8 w-8 items-center justify-center rounded-lg border border-amber-200 text-umber hover:bg-amber-50"
-                    aria-label="Decrease"
+                    aria-label={item.quantity === 1 ? "Remove item" : "Decrease quantity"}
                   >
                     −
                   </button>
                   <span className="w-8 text-center text-sm font-medium">{item.quantity}</span>
                   <button
                     type="button"
-                    onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-amber-200 text-umber hover:bg-amber-50"
-                    aria-label="Increase"
+                    onClick={() => updateQuantity(String(item.id), item.quantity + 1)}
+                    disabled={typeof item.stock === "number" && item.quantity >= item.stock}
+                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-amber-200 text-umber hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    aria-label="Increase quantity"
                   >
                     +
                   </button>
                   <button
                     type="button"
-                    onClick={() => removeFromCart(item.id)}
+                    onClick={() => removeFromCart(String(item.id))}
                     className="ml-2 text-sm text-red-600 hover:underline"
                   >
                     Remove
@@ -125,7 +141,7 @@ export default function CartPage() {
                 </div>
               </div>
               <div className="text-right font-semibold text-umber sm:text-lg">
-                ${(item.price * item.quantity).toFixed(2)}
+                RM{(item.price * item.quantity).toFixed(2)}
               </div>
             </div>
           ))}
@@ -134,11 +150,13 @@ export default function CartPage() {
         <div className="mt-10 rounded-2xl border border-amber-200/60 bg-white p-6">
           <div className="flex justify-between text-lg font-semibold text-umber">
             <span>Subtotal</span>
-            <span>${subtotal.toFixed(2)}</span>
+            <span>RM{subtotal.toFixed(2)}</span>
           </div>
           <p className="mt-2 text-sm text-umber/60">Shipping and tax calculated at checkout.</p>
           {checkoutError && (
-            <p className="mt-4 text-sm font-medium text-red-600">{checkoutError}</p>
+            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700">
+              {checkoutError}
+            </div>
           )}
           <button
             type="button"

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Product } from "@/types";
 import { useCart } from "@/context/CartContext";
 import { useState } from "react";
+import { supabase } from "@/lib/supabase";
 
 interface ProductDetailProps {
   product: Product;
@@ -16,16 +17,46 @@ function getStock(product: Product): number | undefined {
   return Number.isNaN(n) ? undefined : n;
 }
 
+function toPublicSupabaseUrl(raw: string): string {
+  const value = raw.trim();
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) return value;
+
+  const projectUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").replace(/\/+$/, "");
+  const bucket = (process.env.NEXT_PUBLIC_SUPABASE_PRODUCT_BUCKET ?? "pet_commerce").trim();
+  if (!bucket) return value;
+
+  if (value.startsWith("/storage/v1/object/public/")) {
+    return projectUrl ? `${projectUrl}${value}` : value;
+  }
+
+  let normalizedPath = value.replace(/^\/+/, "");
+  const bucketPrefix = `${bucket}/`;
+  if (normalizedPath.startsWith(bucketPrefix)) {
+    normalizedPath = normalizedPath.slice(bucketPrefix.length);
+  }
+
+  const { data } = supabase.storage
+    .from(bucket)
+    .getPublicUrl(normalizedPath);
+  return data?.publicUrl || value;
+}
+
 export default function ProductDetail({ product }: ProductDetailProps) {
   const { addToCart, items } = useCart();
   const [quantity, setQuantity] = useState(1);
   const [added, setAdded] = useState(false);
+  const imageUrl = typeof product.image_url === "string" && product.image_url.trim()
+    ? toPublicSupabaseUrl(product.image_url)
+    : typeof product.image === "string" && product.image.trim()
+      ? toPublicSupabaseUrl(product.image)
+      : `https://picsum.photos/600/600?random=${product.id}`;
 
-  const baseStock = getStock(product);
-  const cartQty = items.find((i) => String(i.id) === String(product.id))?.quantity ?? 0;
-  const stock = baseStock !== undefined ? Math.max(0, baseStock - cartQty) : undefined;
-  const outOfStock = stock !== undefined && stock <= 0;
-  const maxQty = stock !== undefined ? Math.max(0, stock) : undefined;
+  const stock = getStock(product);
+  const inCartQty = items.find((i) => String(i.id) === String(product.id))?.quantity ?? 0;
+  const availableStock = stock !== undefined ? Math.max(0, stock - inCartQty) : undefined;
+  const outOfStock = availableStock !== undefined && availableStock <= 0;
+  const maxQty = availableStock !== undefined ? Math.max(0, availableStock) : undefined;
   const effectiveQty = maxQty !== undefined ? Math.min(quantity, maxQty) : quantity;
 
   const handleAddToCart = () => {
@@ -47,9 +78,10 @@ export default function ProductDetail({ product }: ProductDetailProps) {
         <div className="mt-8 grid gap-8 lg:grid-cols-2">
           <div className="relative aspect-square overflow-hidden rounded-2xl bg-amber-50">
             <Image
-              src={`https://picsum.photos/600/600?random=${product.id}`}
+              src={imageUrl}
               alt={product.name}
               fill
+              unoptimized
               className="object-cover"
               priority
               sizes="(max-width: 1024px) 100vw, 50vw"
@@ -67,14 +99,14 @@ export default function ProductDetail({ product }: ProductDetailProps) {
             <p className="mt-4 text-2xl font-bold text-terracotta">
               RM{Number(product.price ?? 0).toFixed(2)}
             </p>
-            {stock !== undefined && (
+            {availableStock !== undefined && (
               <p className="mt-2 text-sm text-umber/70">
                 {outOfStock ? (
                   <span className="font-medium text-red-600">Out of stock</span>
-                ) : stock <= 5 ? (
-                  <span>Only {stock} left in stock</span>
+                ) : availableStock <= 5 ? (
+                  <span>Only {availableStock} left in stock</span>
                 ) : (
-                  <span className="text-sage">{stock} in stock</span>
+                  <span className="text-sage">{availableStock} in stock</span>
                 )}
               </p>
             )}

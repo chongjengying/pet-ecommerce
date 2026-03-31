@@ -31,6 +31,12 @@ export default function Home() {
             >
               Book grooming
             </Link>
+            <Link
+              href="/admin"
+              className="rounded-full border border-umber/30 bg-umber/10 px-6 py-3 text-sm font-medium text-umber/80 transition hover:bg-umber/20"
+            >
+              Admin (temp)
+            </Link>
           </div>
         </div>
       </section>

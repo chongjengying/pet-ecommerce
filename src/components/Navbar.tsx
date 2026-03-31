@@ -12,17 +12,30 @@ const navLinks = [
 ];
 
 export default function Navbar() {
-  const { cartCount } = useCart();
+  const { cartCount, openCartFlyout } = useCart();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [logoBroken, setLogoBroken] = useState(false);
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-amber-200/60 bg-cream/95 backdrop-blur supports-[backdrop-filter]:bg-cream/80">
       <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
         <Link
           href="/"
-          className="text-xl font-bold tracking-tight text-umber sm:text-2xl"
+          className="flex items-center gap-3 text-xl font-bold tracking-tight text-umber sm:text-2xl"
         >
-          Paw & Co
+          {!logoBroken ? (
+            <img
+              src="/logo.png"
+              alt="PAWLUXE logo"
+              className="h-9 w-9 rounded-full object-cover ring-1 ring-amber-300/60"
+              onError={() => setLogoBroken(true)}
+            />
+          ) : (
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-umber text-xs font-semibold text-amber-100">
+              PL
+            </span>
+          )}
+          <span>PAWLUXE</span>
         </Link>
 
         {/* Desktop nav */}
@@ -38,10 +51,11 @@ export default function Navbar() {
             </li>
           ))}
           <li>
-            <Link
-              href="/cart"
+            <button
+              type="button"
+              onClick={openCartFlyout}
               className="relative flex h-10 w-10 items-center justify-center rounded-full bg-amber-100 text-umber transition hover:bg-amber-200"
-              aria-label="Cart"
+              aria-label="Open cart"
             >
               <svg
                 className="h-5 w-5"
@@ -61,16 +75,17 @@ export default function Navbar() {
                   {cartCount > 99 ? "99+" : cartCount}
                 </span>
               )}
-            </Link>
+            </button>
           </li>
         </ul>
 
         {/* Mobile menu button */}
         <div className="flex items-center gap-2 md:hidden">
-          <Link
-            href="/cart"
+          <button
+            type="button"
+            onClick={openCartFlyout}
             className="relative flex h-10 w-10 items-center justify-center rounded-full bg-amber-100 text-umber"
-            aria-label="Cart"
+            aria-label="Open cart"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
@@ -80,7 +95,7 @@ export default function Navbar() {
                 {cartCount}
               </span>
             )}
-          </Link>
+          </button>
           <button
             type="button"
             onClick={() => setMobileOpen((o) => !o)}
