@@ -12,5 +12,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
   const { id } = await params;
   const product = await getProductById(id).catch(() => null);
   if (!product) return notFound();
-  return <ProductDetail product={product} />;
+  const all = await getProducts().catch(() => []);
+  const related = all.filter((p) => String(p.id) !== String(id)).slice(0, 4);
+  return <ProductDetail product={product} relatedProducts={related} />;
 }

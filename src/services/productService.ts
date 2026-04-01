@@ -1,8 +1,40 @@
 import { createClient } from "@supabase/supabase-js"
+import { resolveProductImageUrl, toPublicSupabaseUrl } from "@/lib/productImage"
 import { supabase } from "@/lib/supabase"
 import type { Product } from "@/types"
 
 type ProductRow = Record<string, unknown> & { id?: string | number }
+
+/**
+ * PDP text fields may be `text` or `jsonb` in Postgres; Supabase returns strings,
+ * objects, or arrays. Strict `typeof === "string"` checks drop valid DB values.
+ */
+function coerceProductDetailText(...candidates: unknown[]): string | null {
+  for (const value of candidates) {
+    if (value == null) continue
+    if (typeof value === "string") {
+      const t = value.trim()
+      if (t.length > 0) return t
+      continue
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+      return String(value)
+    }
+    if (Array.isArray(value)) {
+      const joined = value
+        .map((item) => (typeof item === "string" ? item : JSON.stringify(item)))
+        .join("\n")
+        .trim()
+      if (joined.length > 0) return joined
+      continue
+    }
+    if (typeof value === "object") {
+      const s = JSON.stringify(value)
+      if (s && s !== "{}") return s
+    }
+  }
+  return null
+}
 
 type InventoryLogInput = {
   order_id?: string | null
@@ -221,12 +253,7 @@ function normalizeProduct(row: ProductRow): Product | null {
 
   const image = typeof row?.image === "string" ? row.image : undefined
   const image_url = typeof row?.image_url === "string" ? row.image_url : undefined
-  const description =
-    row?.description == null
-      ? null
-      : typeof row.description === "string"
-        ? row.description
-        : null
+  const description = coerceProductDetailText(row?.description)
   const category =
     typeof row?.category === "string"
       ? row.category
@@ -235,6 +262,45 @@ function normalizeProduct(row: ProductRow): Product | null {
         : String(row?.category_id ?? row?.categoryid)
   const stockNum = Number(row?.stock)
   const stock = Number.isFinite(stockNum) ? stockNum : undefined
+
+  const brandRaw = row?.brand ?? row?.brand_name
+  const brand =
+    brandRaw != null && String(brandRaw).trim() ? String(brandRaw).trim() : null
+
+  const compareRaw = row?.compare_at_price ?? row?.compare_price ?? row?.original_price
+  const compareNum = Number(compareRaw)
+  const compare_at_price =
+    Number.isFinite(compareNum) && compareNum > 0 ? compareNum : null
+
+  const sizeRaw = row?.size_label ?? row?.size ?? row?.item_size
+  const size_label =
+    sizeRaw != null && String(sizeRaw).trim() ? String(sizeRaw).trim() : null
+
+  const colorRaw = row?.color ?? row?.colour
+  const color =
+    colorRaw != null && String(colorRaw).trim() ? String(colorRaw).trim() : null
+
+  const benefit = coerceProductDetailText(
+    row?.benefit,
+    row?.benefits,
+    row?.benefit_text
+  )
+  const ingredients = coerceProductDetailText(
+    row?.ingredients,
+    row?.ingredient,
+    row?.ingredients_text
+  )
+  const analysis = coerceProductDetailText(row?.analysis)
+  const feeding_instructions = coerceProductDetailText(
+    row?.feeding_instructions,
+    row?.feeding_instruction
+  )
+  const delivery_badge_text =
+    row?.delivery_badge_text == null
+      ? null
+      : typeof row.delivery_badge_text === "string"
+        ? row.delivery_badge_text
+        : null
 
   return {
     id,
@@ -245,7 +311,42 @@ function normalizeProduct(row: ProductRow): Product | null {
     description,
     category,
     stock,
+    brand,
+    compare_at_price,
+    size_label,
+    size: size_label,
+    color,
+    benefit,
+    ingredients,
+    analysis,
+    feeding_instructions,
+    delivery_badge_text,
   }
+}
+
+/** Gallery URLs for PDP (product_images). Empty if table missing or no rows. */
+async function fetchProductGalleryUrls(productId: string | number): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("product_images")
+    .select("image_url,is_main,sort_order")
+    .eq("product_id", productId)
+
+  if (error || !Array.isArray(data) || data.length === 0) return []
+
+  const rows = data
+    .filter((r) => typeof r.image_url === "string" && String(r.image_url).trim())
+    .map((r) => ({
+      url: String(r.image_url).trim(),
+      is_main: Boolean(r.is_main),
+      sort_order: Number.isFinite(Number(r.sort_order)) ? Number(r.sort_order) : 0,
+    }))
+    .sort((a, b) => {
+      if (a.is_main !== b.is_main) return a.is_main ? -1 : 1
+      return a.sort_order - b.sort_order
+    })
+
+  const urls = rows.map((r) => toPublicSupabaseUrl(r.url)).filter(Boolean)
+  return Array.from(new Set(urls))
 }
 
 export async function getProducts(): Promise<Product[]> {
@@ -288,7 +389,12 @@ export async function getProductById(productId: string | number): Promise<Produc
   const [withCategory] = await attachCategoryNames([withImage as ProductRow])
   const normalized = normalizeProduct(withCategory as ProductRow)
   if (!normalized) throw new Error("Product shape is invalid")
-  return normalized
+
+  const galleryUrls = await fetchProductGalleryUrls(id)
+  const mainFallback = resolveProductImageUrl(normalized)
+  const gallery_images = galleryUrls.length > 0 ? galleryUrls : [mainFallback]
+
+  return { ...normalized, gallery_images }
 }
 
 /** Decrement product stock by quantity. Throws if insufficient stock. */

@@ -9,6 +9,11 @@
   --terracotta-light: #e8c4b0;
   --sage: #8b9f82;
   --sage-light: #c5d4bd;
+  /* Marketing pages (product-detail–inspired UI) */
+  --brand-promo: #d9f3c0;
+  --brand-accent: #2563eb;
+  --brand-accent-hover: #1d4ed8;
+  --brand-border: #e5e7eb;
 }
 
 @theme inline {
@@ -20,6 +25,10 @@
   --color-terracotta-light: var(--terracotta-light);
   --color-sage: var(--sage);
   --color-sage-light: var(--sage-light);
+  --color-brand-promo: var(--brand-promo);
+  --color-brand-accent: var(--brand-accent);
+  --color-brand-accent-hover: var(--brand-accent-hover);
+  --color-brand-border: var(--brand-border);
   --font-sans: var(--font-dm-sans), system-ui, sans-serif;
   --font-mono: var(--font-geist-mono);
 }

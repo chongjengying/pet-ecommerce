@@ -1,7 +1,10 @@
 import Link from "next/link";
-import Image from "next/image";
 import { getProducts } from "@/services/productService";
+import type { Product } from "@/types";
+import { resolveProductImageUrl } from "@/lib/productImage";
 import AdminProductUploadForm from "@/components/admin/AdminProductUploadForm";
+import AdminProductDeleteButton from "@/components/admin/AdminProductDeleteButton";
+import AdminImageZoomViewer from "@/components/admin/AdminImageZoomViewer";
 
 export const metadata = {
   title: "Admin Products – Paw & Co",
@@ -41,34 +44,46 @@ export default async function AdminProductsPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-left text-sm">
+            <table className="w-full min-w-[880px] text-left text-sm">
               <thead>
                 <tr className="border-b border-amber-200/60 bg-amber-50/50">
                   <th className="px-4 py-3 font-semibold text-umber">Product</th>
                   <th className="px-4 py-3 font-semibold text-umber">Category</th>
+                  <th className="px-4 py-3 font-semibold text-umber">Benefit</th>
                   <th className="px-4 py-3 font-semibold text-umber">Price</th>
                   <th className="px-4 py-3 font-semibold text-umber">Stock</th>
                   <th className="px-4 py-3 font-semibold text-umber">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {list.map((p: { id: string; name: string; category?: string; price?: number; stock?: number; image?: string; image_url?: string }) => (
+                {list.map((p: Product) => (
                   <tr key={p.id} className="border-b border-amber-100 transition hover:bg-amber-50/30">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
-                        <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-amber-50">
-                          <Image
-                            src={p.image ?? p.image_url ?? `https://picsum.photos/80/80?random=${p.id}`}
-                            alt=""
-                            fill
-                            className="object-cover"
-                            sizes="40px"
-                          />
+                        <AdminImageZoomViewer
+                          src={resolveProductImageUrl(p)}
+                          alt={p.name}
+                        />
+                        <div className="min-w-0">
+                          <span className="font-medium text-umber">{p.name}</span>
+                          {((p.size_label ?? p.size)?.trim() || p.color?.trim()) ? (
+                            <p className="mt-0.5 text-xs text-umber/60">
+                              {[(p.size_label ?? p.size)?.trim(), p.color?.trim()].filter(Boolean).join(" · ")}
+                            </p>
+                          ) : null}
                         </div>
-                        <span className="font-medium text-umber">{p.name}</span>
                       </div>
                     </td>
                     <td className="px-4 py-3 text-umber/70">{p.category ?? "—"}</td>
+                    <td className="max-w-[220px] px-4 py-3 text-umber/70">
+                      {p.benefit?.trim() ? (
+                        <span className="line-clamp-2 text-xs" title={p.benefit.trim()}>
+                          {p.benefit.trim()}
+                        </span>
+                      ) : (
+                        <span className="text-umber/40">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 font-medium text-umber">RM{Number(p.price ?? 0).toFixed(2)}</td>
                     <td className="px-4 py-3">
                       <span
@@ -82,12 +97,15 @@ export default async function AdminProductsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <Link
-                        href={`/admin/products/${p.id}/edit`}
-                        className="font-medium text-umber/80 hover:text-umber hover:underline"
-                      >
-                        Edit
-                      </Link>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <Link
+                          href={`/admin/products/${p.id}/edit`}
+                          className="font-medium text-umber/80 hover:text-umber hover:underline"
+                        >
+                          Edit
+                        </Link>
+                        <AdminProductDeleteButton productId={String(p.id)} productName={p.name} />
+                      </div>
                     </td>
                   </tr>
                 ))}

@@ -4,11 +4,13 @@ import Image from "next/image";
 import Link from "next/link";
 import { Product } from "@/types";
 import { useCart } from "@/context/CartContext";
-import { useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { useMemo, useState } from "react";
+import { resolveProductImageUrl } from "@/lib/productImage";
+import ProductCard from "@/components/ProductCard";
 
 interface ProductDetailProps {
   product: Product;
+  relatedProducts: Product[];
 }
 
 function getStock(product: Product): number | undefined {
@@ -17,40 +19,20 @@ function getStock(product: Product): number | undefined {
   return Number.isNaN(n) ? undefined : n;
 }
 
-function toPublicSupabaseUrl(raw: string): string {
-  const value = raw.trim();
-  if (!value) return "";
-  if (/^https?:\/\//i.test(value)) return value;
-
-  const projectUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").replace(/\/+$/, "");
-  const bucket = (process.env.NEXT_PUBLIC_SUPABASE_PRODUCT_BUCKET ?? "pet_commerce").trim();
-  if (!bucket) return value;
-
-  if (value.startsWith("/storage/v1/object/public/")) {
-    return projectUrl ? `${projectUrl}${value}` : value;
-  }
-
-  let normalizedPath = value.replace(/^\/+/, "");
-  const bucketPrefix = `${bucket}/`;
-  if (normalizedPath.startsWith(bucketPrefix)) {
-    normalizedPath = normalizedPath.slice(bucketPrefix.length);
-  }
-
-  const { data } = supabase.storage
-    .from(bucket)
-    .getPublicUrl(normalizedPath);
-  return data?.publicUrl || value;
-}
-
-export default function ProductDetail({ product }: ProductDetailProps) {
+export default function ProductDetail({ product, relatedProducts }: ProductDetailProps) {
   const { addToCart, items } = useCart();
   const [quantity, setQuantity] = useState(1);
   const [added, setAdded] = useState(false);
-  const imageUrl = typeof product.image_url === "string" && product.image_url.trim()
-    ? toPublicSupabaseUrl(product.image_url)
-    : typeof product.image === "string" && product.image.trim()
-      ? toPublicSupabaseUrl(product.image)
-      : `https://picsum.photos/600/600?random=${product.id}`;
+  const [zoomOpen, setZoomOpen] = useState(false);
+
+  const gallery = useMemo(() => {
+    const g = product.gallery_images;
+    if (Array.isArray(g) && g.length > 0) return g;
+    return [resolveProductImageUrl(product)];
+  }, [product]);
+
+  const [activeIndex, setActiveIndex] = useState(0);
+  const mainImageUrl = gallery[Math.min(activeIndex, gallery.length - 1)] ?? resolveProductImageUrl(product);
 
   const stock = getStock(product);
   const inCartQty = items.find((i) => String(i.id) === String(product.id))?.quantity ?? 0;
@@ -59,100 +41,345 @@ export default function ProductDetail({ product }: ProductDetailProps) {
   const maxQty = availableStock !== undefined ? Math.max(0, availableStock) : undefined;
   const effectiveQty = maxQty !== undefined ? Math.min(quantity, maxQty) : quantity;
 
+  const compareAt = product.compare_at_price;
+  const showCompare =
+    compareAt != null && Number.isFinite(compareAt) && compareAt > Number(product.price);
+  const discountPct =
+    showCompare && compareAt
+      ? Math.max(0, Math.round((1 - Number(product.price) / compareAt) * 100))
+      : 0;
+
+  const deliveryLabel = product.delivery_badge_text?.trim() || "RM0 Delivery";
+
+  /** Matches admin “Size” / `size_label` and DB `size` / `item_size` (see normalizeProduct). */
+  const sizeDisplay = useMemo(() => {
+    const s = (product.size_label ?? product.size)?.trim();
+    return s && s.length > 0 ? s : "";
+  }, [product.size_label, product.size]);
+
   const handleAddToCart = () => {
     if (outOfStock || effectiveQty <= 0) return;
-    addToCart(product, effectiveQty);
+    addToCart(
+      {
+        ...product,
+        image: resolveProductImageUrl(product),
+        category: product.category ?? "",
+      },
+      effectiveQty
+    );
     setAdded(true);
     setTimeout(() => setAdded(false), 2000);
   };
 
+  const categoryLabel = product.category?.trim() || "Products";
+  const brandLabel = product.brand?.trim();
+
+  const expandSections = [
+    { key: "benefit", title: "Benefit", value: product.benefit },
+    { key: "ingredients", title: "Ingredients", value: product.ingredients },
+    { key: "feeding", title: "Feeding Instructions", value: product.feeding_instructions },
+  ] as const;
+
+  const sharePage = () => {
+    if (typeof window === "undefined") return;
+    return encodeURIComponent(window.location.href);
+  };
+
   return (
-    <div className="bg-cream">
-      <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-        <Link
-          href="/products"
-          className="inline-flex items-center gap-1 text-sm font-medium text-umber/70 hover:text-umber"
-        >
-          ← Back to products
-        </Link>
-        <div className="mt-8 grid gap-8 lg:grid-cols-2">
-          <div className="relative aspect-square overflow-hidden rounded-2xl bg-amber-50">
-            <Image
-              src={imageUrl}
-              alt={product.name}
-              fill
-              unoptimized
-              className="object-cover"
-              priority
-              sizes="(max-width: 1024px) 100vw, 50vw"
-            />
-          </div>
+    <div className="min-h-screen bg-white text-neutral-900">
+      <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:py-10">
+        {/* Breadcrumbs */}
+        <nav className="text-sm text-teal-600" aria-label="Breadcrumb">
+          <ol className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <li>
+              <Link href="/" className="hover:underline">
+                Home
+              </Link>
+            </li>
+            <li className="text-neutral-400" aria-hidden="true">
+              /
+            </li>
+            <li>
+              <Link href="/products" className="hover:underline">
+                {categoryLabel}
+              </Link>
+            </li>
+            <li className="text-neutral-400" aria-hidden="true">
+              /
+            </li>
+            <li className="font-medium text-neutral-700">{product.name}</li>
+          </ol>
+        </nav>
+
+        <div className="mt-8 grid gap-10 lg:grid-cols-2 lg:gap-12">
+          {/* Left: gallery */}
           <div>
-            {product.category && (
-              <span className="text-xs font-medium uppercase tracking-wider text-sage">
-                {product.category}
-              </span>
-            )}
-            <h1 className="mt-2 text-3xl font-bold tracking-tight text-umber sm:text-4xl">
+            <div className="relative overflow-hidden rounded-xl border border-neutral-200 bg-neutral-50">
+              <div className="relative aspect-square w-full">
+                <Image
+                  src={mainImageUrl}
+                  alt={product.name}
+                  fill
+                  unoptimized
+                  className="object-contain p-4"
+                  sizes="(max-width: 1024px) 100vw, 50vw"
+                  priority
+                />
+              </div>
+              <div className="pointer-events-none absolute bottom-4 left-4 flex items-center gap-2 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm">
+                <span aria-hidden="true">🚚</span>
+                {deliveryLabel}
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-neutral-500">Click the image to expand</p>
+              <button
+                type="button"
+                onClick={() => setZoomOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 shadow-sm hover:bg-neutral-50"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"
+                  />
+                </svg>
+                Click to expand
+              </button>
+            </div>
+
+            {gallery.length > 1 ? (
+              <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+                {gallery.map((url, i) => (
+                  <button
+                    key={`${url}-${i}`}
+                    type="button"
+                    onClick={() => setActiveIndex(i)}
+                    className={`relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border-2 bg-neutral-50 transition ${
+                      i === activeIndex ? "border-teal-600 ring-2 ring-teal-600/20" : "border-neutral-200 hover:border-neutral-300"
+                    }`}
+                    aria-label={`View image ${i + 1}`}
+                  >
+                    <Image src={url} alt="" fill unoptimized className="object-cover" sizes="80px" />
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          {/* Right: info */}
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-neutral-900 sm:text-3xl lg:text-4xl">
               {product.name}
             </h1>
-            <p className="mt-4 text-2xl font-bold text-terracotta">
-              RM{Number(product.price ?? 0).toFixed(2)}
-            </p>
+            {brandLabel ? (
+              <p className="mt-2 text-sm text-teal-600">
+                by{" "}
+                <span className="font-medium hover:underline">
+                  {brandLabel}
+                </span>
+              </p>
+            ) : null}
+
+            <div className="mt-6 flex flex-wrap items-end gap-3">
+              {showCompare && discountPct > 0 ? (
+                <span className="rounded px-2.5 py-1 text-xs font-bold text-white bg-[#e07a6f]">
+                  Save {discountPct}%
+                </span>
+              ) : null}
+              <div className="flex flex-wrap items-baseline gap-3">
+                {showCompare && compareAt != null ? (
+                  <span className="text-lg text-neutral-500 line-through">RM{compareAt.toFixed(2)}</span>
+                ) : null}
+                <span className="text-2xl font-normal text-[#e07a6f] sm:text-3xl">
+                  RM{Number(product.price ?? 0).toFixed(2)}
+                </span>
+              </div>
+            </div>
+
             {availableStock !== undefined && (
-              <p className="mt-2 text-sm text-umber/70">
+              <p className="mt-3 text-sm text-neutral-600">
                 {outOfStock ? (
                   <span className="font-medium text-red-600">Out of stock</span>
                 ) : availableStock <= 5 ? (
                   <span>Only {availableStock} left in stock</span>
                 ) : (
-                  <span className="text-sage">{availableStock} in stock</span>
+                  <span className="text-teal-700">{availableStock} in stock</span>
                 )}
               </p>
             )}
-            {product.description != null && (
-              <p className="mt-6 text-umber/80">{product.description}</p>
-            )}
-            <div className="mt-8 flex flex-wrap items-center gap-4">
-              <div className="flex items-center rounded-xl border border-amber-200 bg-white">
+
+            <div className="mt-8">
+              <p className="text-sm font-bold text-neutral-900">Quantity</p>
+              <div className="mt-2 inline-flex items-center rounded-lg border border-neutral-200 bg-white">
                 <button
                   type="button"
                   onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                  className="flex h-11 w-11 items-center justify-center text-umber hover:bg-amber-50"
+                  className="flex h-11 w-11 items-center justify-center text-neutral-700 hover:bg-neutral-50"
                   aria-label="Decrease quantity"
                 >
                   −
                 </button>
-                <span className="w-12 text-center font-medium">{quantity}</span>
+                <span className="min-w-[3rem] text-center text-sm font-semibold">{effectiveQty}</span>
                 <button
                   type="button"
                   onClick={() =>
                     setQuantity((q) => (maxQty !== undefined ? Math.min(q + 1, maxQty) : q + 1))
                   }
-                  className="flex h-11 w-11 items-center justify-center text-umber hover:bg-amber-50"
+                  disabled={maxQty !== undefined && quantity >= maxQty}
+                  className="flex h-11 w-11 items-center justify-center text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40"
                   aria-label="Increase quantity"
                 >
                   +
                 </button>
               </div>
-              <button
-                type="button"
-                onClick={handleAddToCart}
-                disabled={outOfStock || (maxQty !== undefined && quantity > maxQty)}
-                className="rounded-xl bg-terracotta px-8 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-terracotta/90 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-terracotta"
-              >
-                {outOfStock ? "Out of stock" : added ? "Added to cart ✓" : "Add to cart"}
-              </button>
             </div>
-            <Link
-              href="/cart"
-              className="mt-4 inline-block text-sm font-medium text-terracotta hover:underline"
+
+            <button
+              type="button"
+              onClick={handleAddToCart}
+              disabled={outOfStock || (maxQty !== undefined && quantity > maxQty)}
+              className="mt-6 w-full rounded-lg bg-neutral-900 py-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
+              {outOfStock ? "Out of stock" : added ? "Added to cart ✓" : "Add to cart"}
+            </button>
+
+            <Link href="/cart" className="mt-4 block text-center text-sm font-medium text-teal-600 hover:underline">
               View cart →
             </Link>
+
+            {/* Specs — inline "Label: value" like reference (bold label, regular value) */}
+            <div className="mt-10 space-y-2.5 border-t border-neutral-200 pt-8 text-sm leading-relaxed text-neutral-900">
+              <p>
+                <span className="font-bold">Item:</span>{" "}
+                <span className="font-normal">{product.name}</span>
+              </p>
+              <p>
+                <span className="font-bold">Size:</span>{" "}
+                <span className="font-normal">{sizeDisplay || "—"}</span>
+              </p>
+              <p>
+                <span className="font-bold">Color:</span>{" "}
+                <span className="font-normal">{product.color?.trim() || "—"}</span>
+              </p>
+              <p>
+                <span className="font-bold">Quantity:</span>{" "}
+                <span className="font-normal">
+                  {sizeDisplay ? `${sizeDisplay} x ${effectiveQty}` : `1 x ${effectiveQty}`}
+                </span>
+              </p>
+            </div>
+
+            {product.description != null && String(product.description).trim() ? (
+              <div className="mt-8 border-t border-neutral-200 pt-8">
+                <h2 className="text-sm font-semibold text-neutral-900">Description</h2>
+                <p className="mt-2 text-sm leading-relaxed text-neutral-600">{product.description}</p>
+              </div>
+            ) : null}
+
+            <div className="mt-8 border-t border-neutral-200 pt-2">
+              <h2 className="text-sm font-semibold text-neutral-900">Product details</h2>
+              {expandSections.map(({ key, title, value }) => {
+                const body = value != null && String(value).trim() ? String(value).trim() : null;
+                return (
+                  <details
+                    key={key}
+                    className="group border-b border-neutral-200 py-3 [&_summary::-webkit-details-marker]:hidden"
+                  >
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-sm font-semibold text-neutral-900 hover:text-teal-700">
+                      {title}
+                      <svg
+                        className="h-5 w-5 shrink-0 text-neutral-400 transition group-open:rotate-180"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </summary>
+                    <div className="mt-3 text-sm leading-relaxed text-neutral-600">
+                      {body ? (
+                        <p className="whitespace-pre-wrap">{body}</p>
+                      ) : (
+                        <p className="text-neutral-400 italic">No information added yet.</p>
+                      )}
+                    </div>
+                  </details>
+                );
+              })}
+            </div>
+
+            {/* Share */}
+            <div className="mt-10 flex flex-wrap items-center gap-3 border-t border-neutral-200 pt-8">
+              <span className="text-sm font-medium text-neutral-700">Share this:</span>
+              <div className="flex flex-wrap gap-2">
+                {(
+                  [
+                    { name: "Facebook", color: "bg-[#1877F2]", href: (u: string) => `https://www.facebook.com/sharer/sharer.php?u=${u}` },
+                    { name: "X", color: "bg-neutral-900", href: (u: string) => `https://twitter.com/intent/tweet?url=${u}` },
+                    { name: "in", color: "bg-[#0A66C2]", href: (u: string) => `https://www.linkedin.com/sharing/share-offsite/?url=${u}` },
+                    { name: "P", color: "bg-[#E60023]", href: (u: string) => `https://pinterest.com/pin/create/button/?url=${u}` },
+                  ] as const
+                ).map((s) => (
+                  <button
+                    key={s.name}
+                    type="button"
+                    onClick={() => {
+                      const u = sharePage();
+                      if (!u) return;
+                      window.open(s.href(u), "_blank", "noopener,noreferrer");
+                    }}
+                    className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold text-white shadow-sm ${s.color} hover:opacity-90`}
+                    aria-label={`Share on ${s.name}`}
+                  >
+                    {s.name === "in" ? "in" : s.name === "P" ? "P" : s.name[0]}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
+
+        {/* You may also like */}
+        {relatedProducts.length > 0 ? (
+          <section className="mt-16 border-t border-neutral-200 pt-12">
+            <h2 className="text-center text-xl font-bold text-neutral-900 sm:text-2xl">You may also like</h2>
+            <ul className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+              {relatedProducts.map((p) => (
+                <li key={p.id}>
+                  <ProductCard product={p} />
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
       </div>
+
+      {/* Zoom modal */}
+      {zoomOpen ? (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Product image"
+          onClick={() => setZoomOpen(false)}
+        >
+          <button
+            type="button"
+            className="absolute right-4 top-4 rounded-lg bg-white px-3 py-1.5 text-sm font-semibold text-neutral-900"
+            onClick={() => setZoomOpen(false)}
+          >
+            Close
+          </button>
+          <div className="relative h-[min(85vh,800px)] w-full max-w-4xl" onClick={(e) => e.stopPropagation()}>
+            <Image src={mainImageUrl} alt={product.name} fill unoptimized className="object-contain" sizes="100vw" />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

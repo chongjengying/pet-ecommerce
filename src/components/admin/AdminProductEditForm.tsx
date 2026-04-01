@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import type { Product } from "@/types";
+import AdminImageZoomViewer from "@/components/admin/AdminImageZoomViewer";
 
 const configuredBucket =
   process.env.NEXT_PUBLIC_SUPABASE_PRODUCT_BUCKET?.trim() ?? "";
@@ -18,14 +20,10 @@ async function resolveStorageBucket(): Promise<string> {
   );
 
   for (const bucket of candidates) {
-    const { error } = await supabase.storage
-      .from(bucket)
-      .list("", { limit: 1 });
-
+    const { error } = await supabase.storage.from(bucket).list("", { limit: 1 });
     const message = typeof error?.message === "string" ? error.message : "";
     const bucketMissing =
       message.includes("Bucket not found") || message.includes("bucket not found");
-
     if (!bucketMissing) {
       cachedResolvedBucket = bucket;
       return bucket;
@@ -70,22 +68,62 @@ async function buildDailyImageFilename(bucket: string, ext: string): Promise<str
   return `${prefix}${nextSeq}.${ext}`;
 }
 
-export default function AdminProductUploadForm() {
+interface AdminProductEditFormProps {
+  product: Product;
+}
+
+export default function AdminProductEditForm({ product }: AdminProductEditFormProps) {
   const router = useRouter();
-  const [name, setName] = useState("");
-  const [price, setPrice] = useState("");
-  const [category, setCategory] = useState("");
-  const [stock, setStock] = useState("0");
-  const [imageUrl, setImageUrl] = useState("");
-  const [sizeLabel, setSizeLabel] = useState("");
-  const [color, setColor] = useState("");
-  const [benefit, setBenefit] = useState("");
-  const [ingredients, setIngredients] = useState("");
-  const [feedingInstructions, setFeedingInstructions] = useState("");
+  const [name, setName] = useState(product.name);
+  const [price, setPrice] = useState(String(product.price));
+  const [category, setCategory] = useState(product.category ?? "");
+  const [stock, setStock] = useState(
+    product.stock != null ? String(product.stock) : "0"
+  );
+  const [imageUrl, setImageUrl] = useState(
+    product.image_url ?? product.image ?? ""
+  );
+  const [sizeLabel, setSizeLabel] = useState(product.size_label ?? product.size ?? "");
+  const [color, setColor] = useState(product.color ?? "");
+  const [benefit, setBenefit] = useState(product.benefit ?? "");
+  const [ingredients, setIngredients] = useState(product.ingredients ?? "");
+  const [feedingInstructions, setFeedingInstructions] = useState(
+    product.feeding_instructions ?? ""
+  );
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [touched, setTouched] = useState<Record<string, boolean>>({});
+
+  const initialSnapshot = useMemo(
+    () => ({
+      name: product.name,
+      price: String(product.price),
+      category: product.category ?? "",
+      stock: product.stock != null ? String(product.stock) : "0",
+      imageUrl: product.image_url ?? product.image ?? "",
+      sizeLabel: product.size_label ?? product.size ?? "",
+      color: product.color ?? "",
+      benefit: product.benefit ?? "",
+      ingredients: product.ingredients ?? "",
+      feedingInstructions: product.feeding_instructions ?? "",
+    }),
+    [product]
+  );
+
+  // When switching to another product (same mount), reset form from props.
+  useEffect(() => {
+    setName(product.name);
+    setPrice(String(product.price));
+    setCategory(product.category ?? "");
+    setStock(product.stock != null ? String(product.stock) : "0");
+    setImageUrl(product.image_url ?? product.image ?? "");
+    setSizeLabel(product.size_label ?? product.size ?? "");
+    setColor(product.color ?? "");
+    setBenefit(product.benefit ?? "");
+    setIngredients(product.ingredients ?? "");
+    setFeedingInstructions(product.feeding_instructions ?? "");
+  }, [product.id]);
 
   const priceNum = Number(price);
   const stockNum = Number(stock);
@@ -108,33 +146,17 @@ export default function AdminProductUploadForm() {
   }, [name, price, stock, priceNum, stockNum]);
 
   const hasValidationErrors = Boolean(errors.name || errors.price || errors.stock);
-  const hasUnsavedChanges = useMemo(
-    () =>
-      Boolean(
-        name.trim() ||
-          price.trim() ||
-          category.trim() ||
-          stock !== "0" ||
-          imageUrl.trim() ||
-          sizeLabel.trim() ||
-          color.trim() ||
-          benefit.trim() ||
-          ingredients.trim() ||
-          feedingInstructions.trim()
-      ),
-    [
-      name,
-      price,
-      category,
-      stock,
-      imageUrl,
-      sizeLabel,
-      color,
-      benefit,
-      ingredients,
-      feedingInstructions,
-    ]
-  );
+  const hasUnsavedChanges =
+    name !== initialSnapshot.name ||
+    price !== initialSnapshot.price ||
+    category !== initialSnapshot.category ||
+    stock !== initialSnapshot.stock ||
+    imageUrl !== initialSnapshot.imageUrl ||
+    sizeLabel !== initialSnapshot.sizeLabel ||
+    color !== initialSnapshot.color ||
+    benefit !== initialSnapshot.benefit ||
+    ingredients !== initialSnapshot.ingredients ||
+    feedingInstructions !== initialSnapshot.feedingInstructions;
 
   useEffect(() => {
     if (!toast) return;
@@ -216,8 +238,8 @@ export default function AdminProductUploadForm() {
     }
     setSaving(true);
     try {
-      const response = await fetch("/api/admin/products", {
-        method: "POST",
+      const response = await fetch(`/api/admin/products/${encodeURIComponent(product.id)}`, {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name,
@@ -235,20 +257,24 @@ export default function AdminProductUploadForm() {
 
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(data?.error || "Failed to save product.");
+        throw new Error(data?.error || "Failed to update product.");
       }
 
-      setToast({ type: "success", message: "Product created." });
-      setName("");
-      setPrice("");
-      setCategory("");
-      setStock("0");
-      setImageUrl("");
-      setSizeLabel("");
-      setColor("");
-      setBenefit("");
-      setIngredients("");
-      setFeedingInstructions("");
+      const saved = data?.product as Product | undefined;
+      if (saved && typeof saved === "object" && saved.id != null) {
+        setName(saved.name);
+        setPrice(String(saved.price));
+        setCategory(saved.category ?? "");
+        setStock(saved.stock != null ? String(saved.stock) : "0");
+        setImageUrl(saved.image_url ?? saved.image ?? "");
+        setSizeLabel(saved.size_label ?? saved.size ?? "");
+        setColor(saved.color ?? "");
+        setBenefit(saved.benefit ?? "");
+        setIngredients(saved.ingredients ?? "");
+        setFeedingInstructions(saved.feeding_instructions ?? "");
+      }
+
+      setToast({ type: "success", message: "Product updated." });
       setTouched({});
       router.refresh();
     } catch (err) {
@@ -261,7 +287,7 @@ export default function AdminProductUploadForm() {
 
   return (
     <form onSubmit={onSubmit} className="space-y-4 rounded-2xl border border-amber-200/60 bg-white p-5 shadow-sm">
-      <h3 className="text-lg font-semibold text-umber">Add Product + Upload Image</h3>
+      <h3 className="text-lg font-semibold text-umber">Edit product</h3>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="space-y-1">
           <span className="text-xs font-medium uppercase tracking-wide text-umber/70">Name</span>
@@ -402,7 +428,11 @@ export default function AdminProductUploadForm() {
         />
         {imageUrl ? (
           <div className="flex items-center gap-3 rounded-lg border border-amber-100 bg-amber-50/40 p-2">
-            <img src={imageUrl} alt="Uploaded preview" className="h-16 w-16 rounded-md object-cover" />
+            <AdminImageZoomViewer
+              src={imageUrl}
+              alt={`${name || "Product"} preview`}
+              thumbClassName="relative h-16 w-16 shrink-0 overflow-hidden rounded-md bg-amber-50"
+            />
             <p className="line-clamp-2 text-xs text-umber/70">{imageUrl}</p>
           </div>
         ) : null}
@@ -426,7 +456,7 @@ export default function AdminProductUploadForm() {
           disabled={saving || uploading || hasValidationErrors}
           className="rounded-xl bg-umber px-4 py-2 text-sm font-semibold text-white hover:bg-umber/90 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {saving ? "Saving..." : uploading ? "Uploading..." : "Save Product"}
+          {saving ? "Saving..." : uploading ? "Uploading..." : "Save changes"}
         </button>
       </div>
     </form>

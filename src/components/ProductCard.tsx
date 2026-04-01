@@ -4,11 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { Product } from "@/types";
 import { useCart } from "@/context/CartContext";
-import { supabase } from "@/lib/supabase";
-
-interface ProductCardProps {
-  product: Product;
-}
+import { resolveProductImageUrl } from "@/lib/productImage";
 
 function getStock(product: Product): number | undefined {
   if (product.stock == null) return undefined;
@@ -16,52 +12,18 @@ function getStock(product: Product): number | undefined {
   return Number.isNaN(n) ? undefined : n;
 }
 
-function toPublicSupabaseUrl(raw: string): string {
-  const value = raw.trim();
-  if (!value) return "";
-  if (/^https?:\/\//i.test(value)) return value;
-
-  const projectUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").replace(/\/+$/, "");
-  const bucket = (process.env.NEXT_PUBLIC_SUPABASE_PRODUCT_BUCKET ?? "pet_commerce").trim();
-  if (!bucket) return value;
-
-  if (value.startsWith("/storage/v1/object/public/")) {
-    return projectUrl ? `${projectUrl}${value}` : value;
-  }
-
-  let normalizedPath = value.replace(/^\/+/, "");
-  const bucketPrefix = `${bucket}/`;
-  if (normalizedPath.startsWith(bucketPrefix)) {
-    normalizedPath = normalizedPath.slice(bucketPrefix.length);
-  }
-
-  const { data } = supabase.storage
-    .from(bucket)
-    .getPublicUrl(normalizedPath);
-  return data?.publicUrl || value;
-}
-
-function pickProductImageUrl(product: Product): string {
-  const supabaseUrl = typeof product.image_url === "string"
-    ? toPublicSupabaseUrl(product.image_url)
-    : "";
-  if (supabaseUrl) return supabaseUrl;
-
-  const fallbackImage = typeof product.image === "string"
-    ? toPublicSupabaseUrl(product.image)
-    : "";
-  if (fallbackImage) return fallbackImage;
-
-  return `https://picsum.photos/400/400?random=${product.id}`;
-}
-
-export default function ProductCard({ product }: ProductCardProps) {
+export default function ProductCard({ product }: { product: Product }) {
   const { addToCart, items } = useCart();
-  const imageUrl = pickProductImageUrl(product);
-  const stock = getStock(product);
+  const imageUrl = resolveProductImageUrl(product);
+  const warehouseStock = getStock(product);
   const inCartQty = items.find((i) => String(i.id) === String(product.id))?.quantity ?? 0;
-  const availableStock = stock !== undefined ? Math.max(0, stock - inCartQty) : undefined;
-  const outOfStock = availableStock !== undefined && availableStock <= 0;
+  const availableToBuy =
+    warehouseStock !== undefined ? Math.max(0, warehouseStock - inCartQty) : undefined;
+
+  // Warehouse empty / negative, or nothing left after cart — never show "0" as if in stock.
+  const outOfStock =
+    (warehouseStock !== undefined && warehouseStock <= 0) ||
+    (availableToBuy !== undefined && availableToBuy <= 0);
 
   return (
     <article className="flex h-full flex-col overflow-hidden rounded-2xl border border-amber-200/60 bg-white shadow-sm transition hover:shadow-md">
@@ -83,23 +45,26 @@ export default function ProductCard({ product }: ProductCardProps) {
             </span>
           )}
           <h2 className="mt-1 text-lg font-semibold text-umber">{product.name}</h2>
-          <p className="mt-2 line-clamp-2 text-sm text-umber/70">
-            {product.description ?? ""}
-          </p>
           <p className="mt-auto pt-3 text-lg font-bold text-terracotta">
             RM{Number(product.price).toFixed(2)}
           </p>
-          {availableStock !== undefined && (
-            <p className="mt-1 text-sm text-umber/70">
-              {outOfStock ? (
-                <span className="font-medium text-red-600">Out of stock</span>
-              ) : availableStock <= 5 ? (
-                <span>Only {availableStock} left</span>
-              ) : (
-                <span className="text-sage">{availableStock} in stock</span>
-              )}
-            </p>
-          )}
+          <p className="mt-1 text-sm">
+            {warehouseStock == null ? (
+              <span className="text-umber/70">—</span>
+            ) : outOfStock ? (
+              <span className="font-medium text-red-600">Out of stock</span>
+            ) : (
+              <span
+                className={
+                  availableToBuy !== undefined && availableToBuy <= 5
+                    ? "font-medium text-terracotta"
+                    : "text-umber/80"
+                }
+              >
+                {availableToBuy}
+              </span>
+            )}
+          </p>
         </div>
       </Link>
       <div className="border-t border-amber-100 p-4">
