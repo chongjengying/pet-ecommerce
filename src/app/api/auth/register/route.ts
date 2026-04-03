@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ADMIN_SESSION_COOKIE } from "@/lib/adminSession";
 import { createCustomerJwt, CUSTOMER_SESSION_COOKIE, CUSTOMER_SESSION_MAX_AGE_SEC } from "@/lib/customerJwt";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
 
@@ -153,6 +154,13 @@ export async function POST(request: Request) {
     secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: CUSTOMER_SESSION_MAX_AGE_SEC,
+  });
+  response.cookies.set(ADMIN_SESSION_COOKIE, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 0,
   });
 
   return response;

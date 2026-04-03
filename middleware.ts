@@ -29,7 +29,8 @@ export async function middleware(request: NextRequest) {
       );
     }
     const token = request.cookies.get(ADMIN_SESSION_COOKIE)?.value;
-    if (!token || !(await verifyAdminSessionToken(token, secret))) {
+    const session = token ? await verifyAdminSessionToken(token, secret) : { ok: false as const };
+    if (!token || !session.ok) {
       return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
     }
     return NextResponse.next();
@@ -51,7 +52,8 @@ export async function middleware(request: NextRequest) {
   }
 
   const token = request.cookies.get(ADMIN_SESSION_COOKIE)?.value;
-  if (!token || !(await verifyAdminSessionToken(token, secret))) {
+  const session = token ? await verifyAdminSessionToken(token, secret) : { ok: false as const };
+  if (!token || !session.ok) {
     const url = request.nextUrl.clone();
     url.pathname = "/admin/login";
     url.searchParams.set("next", pathname);

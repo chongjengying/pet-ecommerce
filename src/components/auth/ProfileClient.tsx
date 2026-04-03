@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { PetLogoLoader } from "@/components/ui/PetLogoLoader";
+import { getAvatarInitials, UserAvatar } from "@/components/ui/UserAvatar";
 
 type ProfileUser = {
   id: string;
@@ -14,14 +16,10 @@ type ProfileUser = {
   dob?: string | null;
 };
 
-function getInitials(source: string): string {
-  const parts = source
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? "");
-  if (parts.length > 0 && parts.some(Boolean)) return parts.join("");
-  return source.charAt(0).toUpperCase();
+/** Show username without a leading @ (handles legacy data that includes @). */
+function displayUsername(raw: string | undefined | null): string {
+  if (raw == null || String(raw).trim() === "") return "—";
+  return String(raw).trim().replace(/^@+/, "");
 }
 
 export default function ProfileClient() {
@@ -55,11 +53,11 @@ export default function ProfileClient() {
             router.replace("/auth/login?next=/profile");
             return;
           }
-          const token = typeof window !== "undefined" ? localStorage.getItem("customer_jwt_token") : null;
+          const token2 = typeof window !== "undefined" ? localStorage.getItem("customer_jwt_token") : null;
           const meRes = await fetch("/api/auth/me", {
             method: "GET",
             headers: {
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              ...(token2 ? { Authorization: `Bearer ${token2}` } : {}),
             },
           });
           if (!active) return;
@@ -148,7 +146,7 @@ export default function ProfileClient() {
 
       setNotice(null);
       setUser(data.user);
-      setSuccess("Profile updated");
+      setSuccess("Changes saved.");
     } catch {
       setError("Could not save profile.");
     } finally {
@@ -158,151 +156,175 @@ export default function ProfileClient() {
 
   if (loading) {
     return (
-      <div className="rounded-3xl border border-amber-200/70 bg-white p-8 shadow-sm">
-        <p className="text-sm text-umber/70">Loading your profile...</p>
+      <div className="overflow-hidden rounded-2xl border border-amber-200/60 bg-white py-14 shadow-sm sm:py-16">
+        <PetLogoLoader label="Loading your profile…" size="md" />
       </div>
     );
   }
 
   if (!user) {
     return (
-      <div className="rounded-3xl border border-red-200 bg-white p-8 shadow-sm">
+      <div className="rounded-2xl border border-red-200/80 bg-white p-8 shadow-sm">
         <p className="text-sm text-red-700">{error || "Could not load profile details."}</p>
       </div>
     );
   }
 
-  const displayName = user?.full_name?.trim() || user?.username || "there";
-  const initials = user ? getInitials(user.full_name || user.username || "P") : "P";
+  const userHandle = displayUsername(user.username);
+  const greetingName = user.full_name?.trim() || userHandle;
+  const initials = getAvatarInitials(user.full_name, user.username.replace(/^@+/, ""));
 
   return (
-    <section className="overflow-hidden rounded-3xl border border-amber-200/70 bg-white shadow-[0_18px_45px_rgba(44,36,32,0.08)]">
-      <div className="bg-gradient-to-r from-amber-50 via-cream to-emerald-50 px-6 py-7 sm:px-8">
-        <div className="flex items-center gap-4">
-          {user?.avatar_url ? (
-            <img
-              src={user.avatar_url}
-              alt={displayName}
-              className="h-16 w-16 rounded-full object-cover ring-2 ring-white"
-            />
-          ) : (
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-umber/10 text-2xl font-semibold text-umber ring-2 ring-white">
-              {initials}
-            </div>
-          )}
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sage">Customer Profile</p>
-            <h1 className="mt-1 text-3xl font-semibold text-umber">Hi {displayName}</h1>
-            <p className="text-sm text-umber/70">@{user?.username}</p>
+    <div className="overflow-hidden rounded-2xl border border-amber-200/70 bg-white shadow-[0_12px_40px_rgba(44,36,32,0.06)]">
+      {/* Header */}
+      <div className="border-b border-amber-100/90 bg-gradient-to-br from-white via-cream to-amber-50/40 px-6 py-8 sm:px-10 sm:py-9">
+        <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:gap-8">
+          <UserAvatar src={user.avatar_url} alt={greetingName} initials={initials} size="lg" />
+          <div className="min-w-0 flex-1 space-y-1">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-umber/45">Your profile</p>
+            <h1 className="text-2xl font-semibold tracking-tight text-umber sm:text-3xl">Hi, {greetingName}</h1>
+            <dl className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-sm text-umber/65">
+              <div className="flex items-baseline gap-2">
+                <dt className="text-umber/45">Username</dt>
+                <dd className="font-medium text-umber">{userHandle}</dd>
+              </div>
+            </dl>
           </div>
         </div>
         {isSetupFlow ? (
-          <p className="mt-4 rounded-xl border border-amber-200 bg-white/80 px-4 py-2 text-sm text-amber-900">
-            Complete your details and click Save changes to finish account setup.
+          <p className="mt-6 rounded-xl border border-amber-200/80 bg-white/90 px-4 py-3 text-sm leading-relaxed text-amber-950/90">
+            Complete your details below, then save to finish account setup.
           </p>
         ) : null}
       </div>
 
       <form
-        className="space-y-6 border-t border-amber-100 px-6 py-6 sm:px-8"
+        className="px-6 py-8 sm:px-10 sm:py-9"
         onSubmit={(event) => {
           event.preventDefault();
           const fd = new FormData(event.currentTarget);
           void onSave(fd);
         }}
       >
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="rounded-2xl border border-amber-100 bg-cream/60 p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-umber/60">Email</p>
-            <p className="mt-2 text-sm font-medium text-umber">{user?.email || "No email on file"}</p>
+        {/* Account (read-only) */}
+        <section aria-labelledby="account-heading" className="pb-8">
+          <h2 id="account-heading" className="text-sm font-semibold text-umber">
+            Account
+          </h2>
+          <p className="mt-1 text-xs text-umber/55">These fields cannot be changed here.</p>
+          <dl className="mt-5 grid gap-4 sm:grid-cols-2">
+            <div className="rounded-xl border border-amber-100/90 bg-cream/40 px-4 py-3.5">
+              <dt className="text-[11px] font-medium uppercase tracking-wider text-umber/45">Email</dt>
+              <dd className="mt-1.5 break-all text-sm font-medium text-umber">{user.email || "—"}</dd>
+            </div>
+            <div className="rounded-xl border border-amber-100/90 bg-cream/40 px-4 py-3.5">
+              <dt className="text-[11px] font-medium uppercase tracking-wider text-umber/45">Username</dt>
+              <dd className="mt-1.5 text-sm font-medium text-umber">{userHandle}</dd>
+            </div>
+          </dl>
+        </section>
+
+        <div className="border-t border-amber-100/90" />
+
+        {/* Editable */}
+        <section aria-labelledby="details-heading" className="pt-8">
+          <h2 id="details-heading" className="text-sm font-semibold text-umber">
+            Personal details
+          </h2>
+          <p className="mt-1 text-xs text-umber/55">Update your information anytime.</p>
+
+          <div className="mt-6 grid gap-5 sm:grid-cols-2">
+            <label className="block space-y-1.5 sm:col-span-1">
+              <span className="text-sm font-medium text-umber/90">Full name</span>
+              <input
+                name="full_name"
+                defaultValue={user.full_name ?? ""}
+                autoComplete="name"
+                className="w-full rounded-xl border border-amber-200/80 bg-white px-3.5 py-2.5 text-sm text-umber shadow-sm outline-none transition placeholder:text-umber/35 focus:border-sage/70 focus:ring-2 focus:ring-sage/20"
+                placeholder="Your name"
+              />
+            </label>
+            <label className="block space-y-1.5 sm:col-span-1">
+              <span className="text-sm font-medium text-umber/90">Phone</span>
+              <input
+                name="phone"
+                defaultValue={user.phone ?? ""}
+                autoComplete="tel"
+                className="w-full rounded-xl border border-amber-200/80 bg-white px-3.5 py-2.5 text-sm text-umber shadow-sm outline-none transition placeholder:text-umber/35 focus:border-sage/70 focus:ring-2 focus:ring-sage/20"
+                placeholder="+60 12 345 6789"
+              />
+            </label>
+            <label className="block space-y-1.5 sm:col-span-1">
+              <span className="text-sm font-medium text-umber/90">Gender</span>
+              <select
+                name="gender"
+                defaultValue={user.gender ?? ""}
+                className="w-full rounded-xl border border-amber-200/80 bg-white px-3.5 py-2.5 text-sm text-umber shadow-sm outline-none transition focus:border-sage/70 focus:ring-2 focus:ring-sage/20"
+              >
+                <option value="">Prefer not to say</option>
+                <option value="female">Female</option>
+                <option value="male">Male</option>
+                <option value="non-binary">Non-binary</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <label className="block space-y-1.5 sm:col-span-1 sm:max-w-xs">
+              <span className="text-sm font-medium text-umber/90">Date of birth</span>
+              <input
+                type="date"
+                name="dob"
+                defaultValue={user.dob ?? ""}
+                className="w-full rounded-xl border border-amber-200/80 bg-white px-3.5 py-2.5 text-sm text-umber shadow-sm outline-none transition focus:border-sage/70 focus:ring-2 focus:ring-sage/20"
+              />
+            </label>
           </div>
-          <div className="rounded-2xl border border-amber-100 bg-cream/60 p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-umber/60">Username</p>
-            <p className="mt-2 text-sm font-medium text-umber">@{user?.username}</p>
-          </div>
-        </div>
+        </section>
 
-        <div>
-          <h2 className="text-sm font-semibold uppercase tracking-[0.16em] text-umber/70">Personal details</h2>
-          <p className="mt-1 text-xs text-umber/60">Avatar image URL is managed in the database/storage pipeline.</p>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <label className="space-y-2">
-            <span className="text-sm font-semibold text-umber">Full name</span>
-            <input
-              name="full_name"
-              defaultValue={user?.full_name ?? ""}
-              className="w-full rounded-2xl border border-amber-200/80 bg-white px-3.5 py-3 text-sm text-umber outline-none transition focus:border-sage focus:bg-white"
-              placeholder="Jane Pawson"
-            />
-          </label>
-          <label className="space-y-2">
-            <span className="text-sm font-semibold text-umber">Phone</span>
-            <input
-              name="phone"
-              defaultValue={user?.phone ?? ""}
-              className="w-full rounded-2xl border border-amber-200/80 bg-white px-3.5 py-3 text-sm text-umber outline-none transition focus:border-sage focus:bg-white"
-              placeholder="+60 12 345 6789"
-            />
-          </label>
-          <label className="space-y-2">
-            <span className="text-sm font-semibold text-umber">Gender</span>
-            <select
-              name="gender"
-              defaultValue={user?.gender ?? ""}
-              className="w-full rounded-2xl border border-amber-200/80 bg-white px-3.5 py-3 text-sm text-umber outline-none transition focus:border-sage focus:bg-white"
-            >
-              <option value="">Prefer not to say</option>
-              <option value="female">Female</option>
-              <option value="male">Male</option>
-              <option value="non-binary">Non-binary</option>
-              <option value="other">Other</option>
-            </select>
-          </label>
-          <label className="space-y-2 sm:col-span-2 sm:max-w-xs">
-            <span className="text-sm font-semibold text-umber">Date of birth</span>
-            <input
-              type="date"
-              name="dob"
-              defaultValue={user?.dob ?? ""}
-              className="w-full rounded-2xl border border-amber-200/80 bg-white px-3.5 py-3 text-sm text-umber outline-none transition focus:border-sage focus:bg-white"
-            />
-          </label>
-        </div>
-
-        {error ? <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
+        {error ? (
+          <p
+            className="mt-6 rounded-xl border border-red-200/90 bg-red-50/90 px-4 py-3 text-sm text-red-800"
+            role="alert"
+          >
+            {error}
+          </p>
+        ) : null}
         {success ? (
-          <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{success}</p>
+          <p className="mt-6 rounded-xl border border-emerald-200/90 bg-emerald-50/90 px-4 py-3 text-sm text-emerald-900">
+            {success}
+          </p>
         ) : null}
         {notice ? (
-          <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">{notice}</p>
+          <p className="mt-6 rounded-xl border border-amber-200/90 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
+            {notice}
+          </p>
         ) : null}
 
-        <div className="flex flex-wrap gap-3">
-          <button
-            type="submit"
-            disabled={saving}
-            className="rounded-2xl bg-umber px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-umber/90 disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            {saving ? "Saving..." : "Save changes"}
-          </button>
-          <button
-            type="button"
-            onClick={() => router.push("/products")}
-            className="rounded-2xl border border-amber-200 bg-white px-4 py-2.5 text-sm font-semibold text-umber transition hover:bg-amber-50"
-          >
-            Continue Shopping
-          </button>
+        <div className="mt-10 flex flex-col gap-3 border-t border-amber-100/90 pt-8 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:gap-3">
+            <button
+              type="submit"
+              disabled={saving}
+              className="inline-flex min-h-[44px] items-center justify-center rounded-xl bg-umber px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-umber/92 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {saving ? "Saving…" : "Save changes"}
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push("/products")}
+              className="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-amber-200/90 bg-white px-6 py-2.5 text-sm font-semibold text-umber shadow-sm transition hover:bg-amber-50/80"
+            >
+              Continue shopping
+            </button>
+          </div>
           <button
             type="button"
             onClick={() => void onSignOut()}
-            className="rounded-2xl border border-amber-200 bg-white px-4 py-2.5 text-sm font-semibold text-umber transition hover:bg-amber-50"
+            className="text-sm font-medium text-umber/50 underline-offset-4 transition hover:text-umber hover:underline sm:ml-auto"
           >
             Sign out
           </button>
         </div>
       </form>
-    </section>
+    </div>
   );
 }

@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { timingSafeEqual } from "crypto";
+import { isAdminRole } from "@/lib/userRole";
 
 export const CUSTOMER_SESSION_COOKIE = "customer_session";
 export const CUSTOMER_SESSION_MAX_AGE_SEC = 60 * 60 * 24 * 7; // 7 days
@@ -158,5 +159,8 @@ export async function getCustomerFromRequest(request: Request): Promise<Customer
   const token = bearer || cookieToken;
   if (!token) return null;
 
-  return verifyCustomerJwt(token);
+  const payload = await verifyCustomerJwt(token);
+  if (!payload) return null;
+  if (isAdminRole(payload.role)) return null;
+  return payload;
 }

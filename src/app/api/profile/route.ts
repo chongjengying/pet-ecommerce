@@ -40,9 +40,11 @@ function isMissingRoleColumnError(error: unknown): boolean {
   return message.includes("role") && message.includes("column");
 }
 
+type UsersQueryResult = { data: unknown; error: { message?: string } | null };
+
 async function selectUsersWithRoleFallback(
   supabase: ReturnType<typeof getSupabaseServerClient>,
-  fetcher: (fields: string) => Promise<{ data: unknown; error: { message?: string } | null }>
+  fetcher: (fields: string) => PromiseLike<UsersQueryResult>
 ): Promise<{ rows: ResolvedUser[]; error: string | null }> {
   const withRole = await fetcher(USER_FIELDS);
   if (!withRole.error) {

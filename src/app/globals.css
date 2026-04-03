@@ -38,3 +38,35 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, sans-serif;
 }
+
+/* Pet-themed loaders (see PetLogoLoader) */
+@keyframes pet-loader-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.06);
+  }
+}
+
+@keyframes pet-loader-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-5px);
+  }
+}
+
+.pet-loader-breathe {
+  animation: pet-loader-breathe 2.2s ease-in-out infinite;
+}
+
+.pet-loader-dot {
+  animation: pet-loader-dot 1.15s ease-in-out infinite;
+}

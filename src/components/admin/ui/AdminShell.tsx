@@ -34,13 +34,19 @@ function Sidebar({ close }: { close?: () => void }) {
   const pathname = usePathname();
 
   return (
-    <aside className="flex h-full flex-col">
-      <div className="flex h-16 items-center border-b border-zinc-200 px-5">
-        <div className="rounded-2xl bg-emerald-100 px-3 py-2 text-sm font-semibold text-emerald-800">
-          Pawluxe
-        </div>
+    <aside className="flex h-full flex-col bg-zinc-950">
+      <div className="flex h-[4.25rem] items-center border-b border-white/[0.06] px-5">
+        <Link href="/admin" onClick={close} className="flex items-center gap-3 outline-none">
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-700 text-sm font-bold text-white shadow-lg shadow-emerald-950/40">
+            P
+          </div>
+          <div className="leading-tight">
+            <p className="text-sm font-semibold tracking-tight text-white">Pawluxe</p>
+            <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-zinc-500">Admin</p>
+          </div>
+        </Link>
       </div>
-      <nav className="flex-1 space-y-1 p-3">
+      <nav className="flex-1 space-y-0.5 overflow-y-auto p-3">
         {navItems.map((item) => {
           const isActive = item.href === "/admin" ? pathname === "/admin" : pathname.startsWith(item.href);
           return (
@@ -48,8 +54,10 @@ function Sidebar({ close }: { close?: () => void }) {
               key={item.href}
               href={item.href}
               onClick={close}
-              className={`flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium transition ${
-                isActive ? "bg-emerald-50 text-emerald-800" : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
+              className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
+                isActive
+                  ? "bg-white/[0.08] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
+                  : "text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-100"
               }`}
             >
               <NavIcon path={item.icon} />
@@ -58,16 +66,16 @@ function Sidebar({ close }: { close?: () => void }) {
           );
         })}
       </nav>
-      <div className="border-t border-zinc-200 p-3">
+      <div className="border-t border-white/[0.06] p-3">
         <Link
           href="/"
           onClick={close}
-          className="flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900"
+          className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-zinc-500 transition hover:bg-white/[0.04] hover:text-zinc-200"
         >
           <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
-          Back to Store
+          Back to store
         </Link>
       </div>
     </aside>
@@ -85,7 +93,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     return match?.label ?? "Dashboard";
   }, [pathname]);
   const displayName = profile?.username?.trim() || "Admin";
-  const displayEmail = profile?.email?.trim() || "admin@pawluxe.com";
+  const displayEmail = profile?.email?.trim() ?? "";
   const avatarInitials = displayName
     .split(/[\s._-]+/)
     .filter(Boolean)
@@ -94,20 +102,20 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     .join("") || "A";
 
   return (
-    <div className="min-h-screen bg-[#f6f5f1]">
+    <div className="min-h-screen bg-zinc-100 bg-[radial-gradient(ellipse_100%_60%_at_50%_-20%,rgba(16,185,129,0.07),transparent)]">
       <div className="hidden md:fixed md:inset-y-0 md:left-0 md:block md:w-64">
-        <div className="h-full border-r border-zinc-200 bg-white">
+        <div className="h-full border-r border-white/[0.06] shadow-[4px_0_24px_-4px_rgba(0,0,0,0.25)]">
           <Sidebar />
         </div>
       </div>
 
       <div className="md:pl-64">
-        <header className="sticky top-0 z-40 border-b border-zinc-200 bg-white/90 px-4 backdrop-blur md:px-6">
-          <div className="mx-auto flex h-16 max-w-[1600px] items-center gap-4">
+        <header className="sticky top-0 z-40 border-b border-zinc-200/80 bg-white/80 px-4 backdrop-blur-xl md:px-6">
+          <div className="mx-auto flex h-[3.75rem] max-w-[1600px] items-center gap-3 md:h-16">
             <button
               type="button"
               onClick={() => setSidebarOpen(true)}
-              className="rounded-xl border border-zinc-200 p-2 text-zinc-600 md:hidden"
+              className="rounded-xl border border-zinc-200/80 bg-white p-2 text-zinc-600 shadow-sm md:hidden"
               aria-label="Open menu"
             >
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -115,28 +123,10 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
               </svg>
             </button>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold text-zinc-900">{pageTitle}</p>
+              <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-zinc-400">Console</p>
+              <p className="truncate text-base font-semibold tracking-tight text-zinc-900">{pageTitle}</p>
             </div>
-            <label className="hidden w-full max-w-xs items-center gap-2 rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2 md:flex">
-              <svg className="h-4 w-4 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m21 21-4.3-4.3m1.3-5.2a6.5 6.5 0 11-13 0 6.5 6.5 0 0113 0z" />
-              </svg>
-              <input
-                type="search"
-                placeholder="Search products or orders..."
-                className="w-full bg-transparent text-sm text-zinc-700 outline-none placeholder:text-zinc-400"
-              />
-            </label>
-            <button
-              type="button"
-              className="rounded-xl border border-zinc-200 p-2 text-zinc-600 transition hover:bg-zinc-100"
-              aria-label="Notifications"
-            >
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M14.5 17h5l-1.4-1.4A2 2 0 0117.5 14V10a5.5 5.5 0 10-11 0v4a2 2 0 01-.6 1.6L4.5 17h5m5 0a3 3 0 11-6 0h6z" />
-              </svg>
-            </button>
-            <div className="hidden items-center gap-3 rounded-2xl border border-zinc-200 px-3 py-1.5 sm:flex">
+            <div className="hidden items-center gap-3 rounded-2xl border border-zinc-200/80 bg-white/90 px-3 py-1.5 shadow-sm sm:flex">
               {loading ? (
                 <>
                   <span className="h-8 w-8 animate-pulse rounded-full bg-zinc-200" />
@@ -154,13 +144,17 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                       className="h-8 w-8 rounded-full object-cover"
                     />
                   ) : (
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-xs font-semibold text-emerald-700">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-emerald-700 text-xs font-semibold text-white shadow-sm">
                       {avatarInitials}
                     </div>
                   )}
-                  <div className="text-xs">
+                  <div className="min-w-0 text-xs">
                     <p className="font-semibold text-zinc-900">{displayName}</p>
-                    <p className="text-zinc-500">{displayEmail}</p>
+                    {displayEmail ? (
+                      <p className="truncate text-zinc-500" title={displayEmail}>
+                        {displayEmail}
+                      </p>
+                    ) : null}
                   </div>
                 </>
               )}
@@ -168,7 +162,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             <AdminLogoutButton />
           </div>
         </header>
-        <main className="mx-auto max-w-[1600px] px-4 py-6 md:px-6">{children}</main>
+        <main className="mx-auto max-w-[1600px] px-4 py-6 md:px-8 md:py-8">{children}</main>
       </div>
 
       {sidebarOpen ? (
@@ -176,10 +170,10 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           <button
             type="button"
             onClick={() => setSidebarOpen(false)}
-            className="h-full w-full bg-black/40"
+            className="h-full w-full bg-black/50 backdrop-blur-[2px]"
             aria-label="Close menu"
           />
-          <div className="h-full w-72 border-r border-zinc-200 bg-white shadow-2xl">
+          <div className="h-full w-[min(20rem,85vw)] shadow-2xl shadow-black/40">
             <Sidebar close={() => setSidebarOpen(false)} />
           </div>
         </div>

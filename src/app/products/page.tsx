@@ -13,15 +13,16 @@ export const dynamic = "force-dynamic";
 export default async function ProductsPage() {
   const products: Product[] = await getProducts();
   return (
-    <div className="bg-cream">
-      <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
-        <h1 className="text-3xl font-bold tracking-tight text-umber sm:text-4xl">
-          Products
-        </h1>
-        <p className="mt-2 text-umber/70">
-          Everything you need for a happy, healthy pet.
-        </p>
-        <ul className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="min-h-[calc(100vh-4rem)] bg-gradient-to-b from-cream via-cream to-amber-50/25">
+      <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:py-14">
+        <header className="max-w-2xl">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-sage/90">Shop</p>
+          <h1 className="mt-2 text-3xl font-bold tracking-tight text-umber sm:text-4xl">Products</h1>
+          <p className="mt-3 text-base leading-relaxed text-umber/70">
+            Everything you need for a happy, healthy pet — curated for quality and care.
+          </p>
+        </header>
+        <ul className="mt-12 grid gap-6 sm:grid-cols-2 sm:gap-7 lg:grid-cols-3 lg:gap-8">
           {products.map((product) => (
             <li key={product.id}>
               <ProductCard product={product} />

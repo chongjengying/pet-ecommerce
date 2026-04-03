@@ -86,35 +86,35 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
   };
 
   return (
-    <div className="min-h-screen bg-white text-neutral-900">
+    <div className="min-h-screen bg-gradient-to-b from-cream via-white to-amber-50/20 text-umber">
       <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:py-10">
         {/* Breadcrumbs */}
-        <nav className="text-sm text-teal-600" aria-label="Breadcrumb">
+        <nav className="text-sm text-umber/70" aria-label="Breadcrumb">
           <ol className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <li>
-              <Link href="/" className="hover:underline">
+              <Link href="/" className="transition hover:text-sage hover:underline">
                 Home
               </Link>
             </li>
-            <li className="text-neutral-400" aria-hidden="true">
+            <li className="text-umber/35" aria-hidden="true">
               /
             </li>
             <li>
-              <Link href="/products" className="hover:underline">
+              <Link href="/products" className="transition hover:text-sage hover:underline">
                 {categoryLabel}
               </Link>
             </li>
-            <li className="text-neutral-400" aria-hidden="true">
+            <li className="text-umber/35" aria-hidden="true">
               /
             </li>
-            <li className="font-medium text-neutral-700">{product.name}</li>
+            <li className="line-clamp-2 font-medium text-umber">{product.name}</li>
           </ol>
         </nav>
 
         <div className="mt-8 grid gap-10 lg:grid-cols-2 lg:gap-12">
           {/* Left: gallery */}
           <div>
-            <div className="relative overflow-hidden rounded-xl border border-neutral-200 bg-neutral-50">
+            <div className="relative overflow-hidden rounded-2xl border border-amber-200/70 bg-gradient-to-b from-amber-50/50 to-cream shadow-sm">
               <div className="relative aspect-square w-full">
                 <Image
                   src={mainImageUrl}
@@ -126,18 +126,18 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
                   priority
                 />
               </div>
-              <div className="pointer-events-none absolute bottom-4 left-4 flex items-center gap-2 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm">
+              <div className="pointer-events-none absolute bottom-4 left-4 flex items-center gap-2 rounded-full bg-umber/90 px-3 py-1.5 text-xs font-semibold text-cream shadow-md backdrop-blur-sm">
                 <span aria-hidden="true">🚚</span>
                 {deliveryLabel}
               </div>
             </div>
 
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs text-neutral-500">Click the image to expand</p>
+              <p className="text-xs text-umber/50">Tap image to expand</p>
               <button
                 type="button"
                 onClick={() => setZoomOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 shadow-sm hover:bg-neutral-50"
+                className="inline-flex items-center gap-1.5 rounded-full border border-amber-200/90 bg-white px-3 py-1.5 text-xs font-medium text-umber shadow-sm transition hover:border-sage/40 hover:bg-cream"
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                   <path
@@ -158,8 +158,8 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
                     key={`${url}-${i}`}
                     type="button"
                     onClick={() => setActiveIndex(i)}
-                    className={`relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border-2 bg-neutral-50 transition ${
-                      i === activeIndex ? "border-teal-600 ring-2 ring-teal-600/20" : "border-neutral-200 hover:border-neutral-300"
+                    className={`relative h-20 w-20 shrink-0 overflow-hidden rounded-xl border-2 bg-cream transition ${
+                      i === activeIndex ? "border-sage ring-2 ring-sage/25" : "border-amber-200/80 hover:border-amber-300"
                     }`}
                     aria-label={`View image ${i + 1}`}
                   >
@@ -172,87 +172,101 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
 
           {/* Right: info */}
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-neutral-900 sm:text-3xl lg:text-4xl">
+            <h1 className="text-2xl font-bold tracking-tight text-umber sm:text-3xl lg:text-4xl">
               {product.name}
             </h1>
             {brandLabel ? (
-              <p className="mt-2 text-sm text-teal-600">
-                by{" "}
-                <span className="font-medium hover:underline">
-                  {brandLabel}
-                </span>
+              <p className="mt-2 text-sm text-sage">
+                by <span className="font-medium">{brandLabel}</span>
               </p>
             ) : null}
 
             <div className="mt-6 flex flex-wrap items-end gap-3">
               {showCompare && discountPct > 0 ? (
-                <span className="rounded px-2.5 py-1 text-xs font-bold text-white bg-[#e07a6f]">
+                <span className="rounded-full bg-terracotta px-2.5 py-1 text-xs font-bold text-white shadow-sm">
                   Save {discountPct}%
                 </span>
               ) : null}
               <div className="flex flex-wrap items-baseline gap-3">
                 {showCompare && compareAt != null ? (
-                  <span className="text-lg text-neutral-500 line-through">RM{compareAt.toFixed(2)}</span>
+                  <span className="text-lg text-umber/45 line-through tabular-nums">RM{compareAt.toFixed(2)}</span>
                 ) : null}
-                <span className="text-2xl font-normal text-[#e07a6f] sm:text-3xl">
-                  RM{Number(product.price ?? 0).toFixed(2)}
-                </span>
+                <p className="tabular-nums">
+                  <span className="text-lg font-medium text-umber/70">RM</span>{" "}
+                  <span className="text-3xl font-semibold tracking-tight text-terracotta sm:text-4xl">
+                    {Number(product.price ?? 0).toFixed(2)}
+                  </span>
+                </p>
               </div>
             </div>
 
             {availableStock !== undefined && (
-              <p className="mt-3 text-sm text-neutral-600">
+              <p className="mt-3 text-sm text-umber/75">
                 {outOfStock ? (
                   <span className="font-medium text-red-600">Out of stock</span>
                 ) : availableStock <= 5 ? (
-                  <span>Only {availableStock} left in stock</span>
+                  <span className="font-medium text-terracotta">Only {availableStock} left in stock</span>
                 ) : (
-                  <span className="text-teal-700">{availableStock} in stock</span>
+                  <span className="text-sage">In stock ({availableStock})</span>
                 )}
               </p>
             )}
 
-            <div className="mt-8">
-              <p className="text-sm font-bold text-neutral-900">Quantity</p>
-              <div className="mt-2 inline-flex items-center rounded-lg border border-neutral-200 bg-white">
+            <div className="mt-8 rounded-2xl border border-amber-200/80 bg-gradient-to-b from-cream/60 to-white p-6 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-umber/50">Quantity</p>
+              <div className="mt-3 inline-flex items-center overflow-hidden rounded-xl border border-amber-200/90 bg-white shadow-sm">
                 <button
                   type="button"
                   onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                  className="flex h-11 w-11 items-center justify-center text-neutral-700 hover:bg-neutral-50"
+                  className="flex h-11 w-11 items-center justify-center text-lg text-umber transition hover:bg-cream"
                   aria-label="Decrease quantity"
                 >
                   −
                 </button>
-                <span className="min-w-[3rem] text-center text-sm font-semibold">{effectiveQty}</span>
+                <span className="min-w-[3rem] text-center text-sm font-semibold tabular-nums text-umber">{effectiveQty}</span>
                 <button
                   type="button"
                   onClick={() =>
                     setQuantity((q) => (maxQty !== undefined ? Math.min(q + 1, maxQty) : q + 1))
                   }
                   disabled={maxQty !== undefined && quantity >= maxQty}
-                  className="flex h-11 w-11 items-center justify-center text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="flex h-11 w-11 items-center justify-center text-lg text-umber transition hover:bg-cream disabled:cursor-not-allowed disabled:opacity-35"
                   aria-label="Increase quantity"
                 >
                   +
                 </button>
               </div>
+
+              <button
+                type="button"
+                onClick={handleAddToCart}
+                disabled={outOfStock || (maxQty !== undefined && quantity > maxQty)}
+                className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-terracotta py-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-terracotta/92 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sage disabled:cursor-not-allowed disabled:bg-umber/35 disabled:text-white/85"
+              >
+                <svg className="h-5 w-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"
+                  />
+                </svg>
+                {outOfStock ? "Out of stock" : added ? "Added to cart" : "Add to cart"}
+              </button>
+              {added ? (
+                <p className="mt-3 text-center text-xs text-sage">You can change quantities in your cart.</p>
+              ) : null}
+
+              <Link
+                href="/cart"
+                className="mt-4 block text-center text-sm font-medium text-sage transition hover:text-umber hover:underline"
+              >
+                View cart →
+              </Link>
             </div>
 
-            <button
-              type="button"
-              onClick={handleAddToCart}
-              disabled={outOfStock || (maxQty !== undefined && quantity > maxQty)}
-              className="mt-6 w-full rounded-lg bg-neutral-900 py-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {outOfStock ? "Out of stock" : added ? "Added to cart ✓" : "Add to cart"}
-            </button>
-
-            <Link href="/cart" className="mt-4 block text-center text-sm font-medium text-teal-600 hover:underline">
-              View cart →
-            </Link>
-
             {/* Specs — inline "Label: value" like reference (bold label, regular value) */}
-            <div className="mt-10 space-y-2.5 border-t border-neutral-200 pt-8 text-sm leading-relaxed text-neutral-900">
+            <div className="mt-10 space-y-2.5 border-t border-amber-200/80 pt-8 text-sm leading-relaxed text-umber">
               <p>
                 <span className="font-bold">Item:</span>{" "}
                 <span className="font-normal">{product.name}</span>
@@ -274,25 +288,25 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
             </div>
 
             {product.description != null && String(product.description).trim() ? (
-              <div className="mt-8 border-t border-neutral-200 pt-8">
-                <h2 className="text-sm font-semibold text-neutral-900">Description</h2>
-                <p className="mt-2 text-sm leading-relaxed text-neutral-600">{product.description}</p>
+              <div className="mt-8 border-t border-amber-200/80 pt-8">
+                <h2 className="text-sm font-semibold text-umber">Description</h2>
+                <p className="mt-2 text-sm leading-relaxed text-umber/75">{product.description}</p>
               </div>
             ) : null}
 
-            <div className="mt-8 border-t border-neutral-200 pt-2">
-              <h2 className="text-sm font-semibold text-neutral-900">Product details</h2>
+            <div className="mt-8 border-t border-amber-200/80 pt-2">
+              <h2 className="text-sm font-semibold text-umber">Product details</h2>
               {expandSections.map(({ key, title, value }) => {
                 const body = value != null && String(value).trim() ? String(value).trim() : null;
                 return (
                   <details
                     key={key}
-                    className="group border-b border-neutral-200 py-3 [&_summary::-webkit-details-marker]:hidden"
+                    className="group border-b border-amber-200/70 py-3 [&_summary::-webkit-details-marker]:hidden"
                   >
-                    <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-sm font-semibold text-neutral-900 hover:text-teal-700">
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-sm font-semibold text-umber hover:text-sage">
                       {title}
                       <svg
-                        className="h-5 w-5 shrink-0 text-neutral-400 transition group-open:rotate-180"
+                        className="h-5 w-5 shrink-0 text-umber/40 transition group-open:rotate-180"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
@@ -301,11 +315,11 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                       </svg>
                     </summary>
-                    <div className="mt-3 text-sm leading-relaxed text-neutral-600">
+                    <div className="mt-3 text-sm leading-relaxed text-umber/75">
                       {body ? (
                         <p className="whitespace-pre-wrap">{body}</p>
                       ) : (
-                        <p className="text-neutral-400 italic">No information added yet.</p>
+                        <p className="text-umber/45 italic">No information added yet.</p>
                       )}
                     </div>
                   </details>
@@ -314,8 +328,8 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
             </div>
 
             {/* Share */}
-            <div className="mt-10 flex flex-wrap items-center gap-3 border-t border-neutral-200 pt-8">
-              <span className="text-sm font-medium text-neutral-700">Share this:</span>
+            <div className="mt-10 flex flex-wrap items-center gap-3 border-t border-amber-200/80 pt-8">
+              <span className="text-sm font-medium text-umber/80">Share this:</span>
               <div className="flex flex-wrap gap-2">
                 {(
                   [
@@ -346,8 +360,8 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
 
         {/* You may also like */}
         {relatedProducts.length > 0 ? (
-          <section className="mt-16 border-t border-neutral-200 pt-12">
-            <h2 className="text-center text-xl font-bold text-neutral-900 sm:text-2xl">You may also like</h2>
+          <section className="mt-16 border-t border-amber-200/80 pt-12">
+            <h2 className="text-center text-xl font-bold text-umber sm:text-2xl">You may also like</h2>
             <ul className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
               {relatedProducts.map((p) => (
                 <li key={p.id}>
@@ -370,7 +384,7 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
         >
           <button
             type="button"
-            className="absolute right-4 top-4 rounded-lg bg-white px-3 py-1.5 text-sm font-semibold text-neutral-900"
+            className="absolute right-4 top-4 rounded-xl bg-white px-3 py-1.5 text-sm font-semibold text-umber shadow-sm"
             onClick={() => setZoomOpen(false)}
           >
             Close

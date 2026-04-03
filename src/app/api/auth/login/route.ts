@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
+import { ADMIN_SESSION_COOKIE } from "@/lib/adminSession";
 import { createCustomerJwt, CUSTOMER_SESSION_COOKIE, CUSTOMER_SESSION_MAX_AGE_SEC } from "@/lib/customerJwt";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
+import { isAdminRole, resolveProfileRole } from "@/lib/userRole";
 
 type LoginBody = {
   identifier?: string;
@@ -175,6 +177,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid username/email or password." }, { status: 401 });
   }
 
+  const profileRole = await resolveProfileRole(supabase, user.id, { missingProfiles: "treatAsNoRole" });
+  if (profileRole.error) {
+    return NextResponse.json({ error: profileRole.error }, { status: 400 });
+  }
+  if (isAdminRole(profileRole.role) || isAdminRole(user.role)) {
+    return NextResponse.json(
+      {
+        error:
+          "This account is for admin access only. Sign in on the admin site — customer sign-in is not available for this account.",
+      },
+      { status: 403 }
+    );
+  }
+
+  const effectiveRole = profileRole.role ?? user.role ?? "customer";
+
   let token = "";
   try {
     token = await createCustomerJwt({
@@ -182,7 +200,7 @@ export async function POST(request: Request) {
       email: user.email,
       username: user.username,
       fullName: user.full_name,
-      role: user.role ?? "customer",
+      role: effectiveRole,
     });
   } catch (err) {
     return NextResponse.json(
@@ -199,7 +217,7 @@ export async function POST(request: Request) {
       email: user.email,
       username: user.username,
       full_name: user.full_name ?? null,
-      role: user.role ?? "customer",
+      role: effectiveRole,
     },
   });
   response.cookies.set(CUSTOMER_SESSION_COOKIE, token, {
@@ -208,6 +226,13 @@ export async function POST(request: Request) {
     secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: CUSTOMER_SESSION_MAX_AGE_SEC,
+  });
+  response.cookies.set(ADMIN_SESSION_COOKIE, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 0,
   });
 
   return response;

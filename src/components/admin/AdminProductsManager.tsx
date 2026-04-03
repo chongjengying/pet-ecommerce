@@ -71,12 +71,12 @@ export default function AdminProductsManager({ products }: { products: Product[]
   };
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-col gap-4 rounded-3xl border border-zinc-200 bg-white p-4 shadow-sm md:flex-row md:items-center md:justify-between">
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)] md:flex-row md:items-center md:justify-between md:p-5">
         <div className="flex flex-1 flex-col gap-3 sm:flex-row sm:items-center">
           <label className="relative w-full max-w-xl">
             <svg
-              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400"
+              className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -90,8 +90,8 @@ export default function AdminProductsManager({ products }: { products: Product[]
                 setQuery(event.target.value);
                 setPage(1);
               }}
-              placeholder="Search by product name or category"
-              className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 py-2.5 pl-10 pr-3 text-sm text-zinc-700 outline-none transition focus:border-emerald-300 focus:bg-white"
+              placeholder="Search by name or category"
+              className="w-full rounded-xl border border-zinc-200 bg-zinc-50/80 py-2.5 pl-10 pr-3 text-sm text-zinc-800 outline-none ring-emerald-500/20 transition placeholder:text-zinc-400 focus:border-emerald-400/80 focus:bg-white focus:ring-4"
             />
           </label>
           <select
@@ -100,7 +100,7 @@ export default function AdminProductsManager({ products }: { products: Product[]
               setFilter(event.target.value as ProductStatusFilter);
               setPage(1);
             }}
-            className="rounded-2xl border border-zinc-200 bg-white px-3 py-2.5 text-sm text-zinc-700 outline-none transition focus:border-emerald-300"
+            className="rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm font-medium text-zinc-700 outline-none transition focus:border-emerald-400/80 focus:ring-4 focus:ring-emerald-500/15"
           >
             <option value="all">All status</option>
             <option value="active">Active</option>
@@ -110,9 +110,9 @@ export default function AdminProductsManager({ products }: { products: Product[]
         </div>
         <Link
           href="/admin/products/new"
-          className="inline-flex items-center justify-center rounded-2xl bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-zinc-700"
+          className="inline-flex items-center justify-center rounded-xl bg-gradient-to-b from-emerald-500 to-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-emerald-900/15 transition hover:from-emerald-600 hover:to-emerald-700"
         >
-          Add Product
+          Add product
         </Link>
       </div>
 
@@ -124,13 +124,17 @@ export default function AdminProductsManager({ products }: { products: Product[]
         {visible.map((product) => {
           const status = inferStatus(product.stock);
           return (
-            <tr key={product.id} className="border-b border-zinc-100">
+            <tr key={product.id} className="border-b border-zinc-100 last:border-0">
               <td className="px-4 py-3">
                 <div className="flex items-center gap-3">
-                  <img src={resolveProductImageUrl(product)} alt={product.name} className="h-11 w-11 rounded-xl object-cover" />
-                  <div>
+                  <img
+                    src={resolveProductImageUrl(product)}
+                    alt={product.name}
+                    className="h-12 w-12 rounded-xl border border-zinc-100 object-cover shadow-sm"
+                  />
+                  <div className="min-w-0">
                     <p className="font-medium text-zinc-900">{product.name}</p>
-                    <p className="text-xs text-zinc-500">{product.id}</p>
+                    <p className="truncate font-mono text-[11px] text-zinc-400">{product.id}</p>
                   </div>
                 </div>
               </td>
@@ -151,14 +155,17 @@ export default function AdminProductsManager({ products }: { products: Product[]
               </td>
               <td className="px-4 py-3 text-zinc-600">{product.category || "-"}</td>
               <td className="px-4 py-3">
-                <div className="flex items-center gap-3">
-                  <Link href={`/admin/products/${encodeURIComponent(String(product.id))}/edit`} className="text-sm font-medium text-zinc-700 hover:text-zinc-900">
+                <div className="flex items-center gap-2">
+                  <Link
+                    href={`/admin/products/${encodeURIComponent(String(product.id))}/edit`}
+                    className="rounded-lg px-2 py-1 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50 hover:text-emerald-800"
+                  >
                     Edit
                   </Link>
                   <button
                     type="button"
                     onClick={() => setPendingDelete(product)}
-                    className="text-sm font-medium text-red-600 hover:text-red-700"
+                    className="rounded-lg px-2 py-1 text-sm font-medium text-red-600/90 transition hover:bg-red-50 hover:text-red-700"
                   >
                     Delete
                   </button>
@@ -169,7 +176,7 @@ export default function AdminProductsManager({ products }: { products: Product[]
         })}
       </AdminTable>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-600">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-zinc-200/90 bg-white/90 px-4 py-3 text-sm text-zinc-600 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
         <span>
           Showing {filtered.length === 0 ? 0 : startIndex + 1}-{Math.min(startIndex + PAGE_SIZE, filtered.length)} of{" "}
           {filtered.length}

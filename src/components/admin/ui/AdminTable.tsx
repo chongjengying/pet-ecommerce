@@ -18,19 +18,19 @@ export default function AdminTable({
   isEmpty = false,
 }: AdminTableProps) {
   return (
-    <div className="overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-sm">
+    <div className="overflow-hidden rounded-2xl border border-zinc-200/90 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
       <div className="overflow-x-auto">
         <table className={`w-full ${minWidthClassName} text-left text-sm`}>
           <thead>
-            <tr className="border-b border-zinc-200 bg-zinc-50/80">
+            <tr className="border-b border-zinc-100 bg-zinc-50/90">
               {columns.map((column) => (
-                <th key={column} className="px-4 py-3 font-semibold text-zinc-700">
+                <th key={column} className="px-4 py-3.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
                   {column}
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody>
+          <tbody className="[&_tr]:transition-colors [&_tr:hover]:bg-zinc-50/90">
             {loading
               ? Array.from({ length: loadingRows }).map((_, index) => (
                   <tr key={index} className="border-b border-zinc-100">

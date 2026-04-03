@@ -10,9 +10,9 @@ export default function AdminLogoutButton() {
       type="button"
       onClick={() => void logout()}
       disabled={loading}
-      className="rounded-xl border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50"
+      className="shrink-0 rounded-full border border-zinc-200/90 bg-white px-4 py-2 text-xs font-semibold text-zinc-700 shadow-sm transition hover:border-zinc-300 hover:bg-zinc-50 disabled:opacity-50"
     >
-      {loading ? "Signing out..." : "Sign out"}
+      {loading ? "Signing out…" : "Sign out"}
     </button>
   );
 }

@@ -53,10 +53,13 @@ export default async function AdminDashboardPage() {
   ];
 
   return (
-    <div className="space-y-7">
+    <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 md:text-3xl">Dashboard</h1>
-        <p className="mt-1 text-sm text-zinc-600">A quick snapshot of your Pawluxe store performance.</p>
+        <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-zinc-400">Overview</p>
+        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900 md:text-3xl">Dashboard</h1>
+        <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-zinc-600">
+          A quick snapshot of your store — sales, orders, and revenue at a glance.
+        </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -64,17 +67,17 @@ export default async function AdminDashboardPage() {
           <Link
             key={label}
             href={href}
-            className="group rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+            className="group rounded-2xl border border-zinc-200/90 bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition hover:-translate-y-0.5 hover:border-emerald-200/60 hover:shadow-md"
           >
-            <p className="text-sm font-medium text-zinc-500">{label}</p>
-            <p className="mt-2 text-2xl font-semibold text-zinc-900">{value}</p>
-            <p className="mt-3 text-xs font-medium text-emerald-700">View details</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400">{label}</p>
+            <p className="mt-2 text-2xl font-semibold tabular-nums text-zinc-900">{value}</p>
+            <p className="mt-3 text-xs font-semibold text-emerald-600 group-hover:text-emerald-700">View →</p>
           </Link>
         ))}
       </div>
 
       <div className="grid gap-4 xl:grid-cols-3">
-        <section className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm xl:col-span-2">
+        <section className="rounded-2xl border border-zinc-200/90 bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] xl:col-span-2">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-semibold text-zinc-900">Sales Overview</h2>
             <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
@@ -99,7 +102,7 @@ export default async function AdminDashboardPage() {
           </div>
         </section>
 
-        <section className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <section className="rounded-2xl border border-zinc-200/90 bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
           <h2 className="text-base font-semibold text-zinc-900">Quick Actions</h2>
           <div className="mt-4 space-y-3">
             <Link

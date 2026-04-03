@@ -6,7 +6,9 @@ import {
   createAdminSessionToken,
   getAdminSessionSecret,
 } from "@/lib/adminSession";
+import { CUSTOMER_SESSION_COOKIE } from "@/lib/customerJwt";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
+import { isAdminRole, resolveProfileRole } from "@/lib/userRole";
 
 type AdminLoginBody = {
   identifier?: string;
@@ -35,11 +37,6 @@ function normalizeAdminUserRow(row: Record<string, unknown>): AdminUserRow {
     username: String(row.username ?? ""),
     password: String(row.password ?? ""),
   };
-}
-
-function isMissingProfilesTable(error: unknown): boolean {
-  const message = String((error as { message?: string })?.message ?? "").toLowerCase();
-  return message.includes("profiles") && (message.includes("does not exist") || message.includes("could not find"));
 }
 
 async function findUserByIdentifier(
@@ -71,45 +68,6 @@ async function findUserByIdentifier(
 
   const row = Array.isArray(byUsername.data) && byUsername.data.length > 0 ? byUsername.data[0] : null;
   return { user: row ? normalizeAdminUserRow(row as Record<string, unknown>) : null, error: null };
-}
-
-async function resolveProfileRole(
-  supabase: ReturnType<typeof getSupabaseServerClient>,
-  userId: string | number
-): Promise<{ role: string | null; error: string | null }> {
-  const byUserId = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("user_id", Number(userId))
-    .maybeSingle();
-  if (!byUserId.error) {
-    const roleValue = byUserId.data && typeof byUserId.data.role === "string" ? byUserId.data.role : null;
-    return { role: roleValue, error: null };
-  }
-
-  if (isMissingProfilesTable(byUserId.error)) {
-    return { role: null, error: "Profiles table not found." };
-  }
-
-  const userIdErrMessage = String(byUserId.error.message ?? "").toLowerCase();
-  if (!userIdErrMessage.includes("user_id") || !userIdErrMessage.includes("column")) {
-    return { role: null, error: byUserId.error.message || "Could not validate admin role." };
-  }
-
-  const byId = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", Number(userId))
-    .maybeSingle();
-  if (byId.error) {
-    if (isMissingProfilesTable(byId.error)) {
-      return { role: null, error: "Profiles table not found." };
-    }
-    return { role: null, error: byId.error.message || "Could not validate admin role." };
-  }
-
-  const roleValue = byId.data && typeof byId.data.role === "string" ? byId.data.role : null;
-  return { role: roleValue, error: null };
 }
 
 export async function POST(request: Request) {
@@ -156,15 +114,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid admin credentials." }, { status: 401 });
   }
 
-  const roleCheck = await resolveProfileRole(supabase, lookup.user.id);
+  const roleCheck = await resolveProfileRole(supabase, lookup.user.id, { missingProfiles: "error" });
   if (roleCheck.error) {
     return NextResponse.json({ error: roleCheck.error }, { status: 400 });
   }
-  if (roleCheck.role?.toLowerCase() !== "admin") {
+  if (!isAdminRole(roleCheck.role)) {
     return NextResponse.json({ error: "Invalid admin credentials." }, { status: 401 });
   }
 
-  const adminToken = await createAdminSessionToken(sessionSecret);
+  const adminToken = await createAdminSessionToken(sessionSecret, String(lookup.user.id));
   const response = NextResponse.json({ success: true });
   response.cookies.set(ADMIN_SESSION_COOKIE, adminToken, {
     httpOnly: true,
@@ -172,6 +130,13 @@ export async function POST(request: Request) {
     secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: ADMIN_SESSION_MAX_AGE_SEC,
+  });
+  response.cookies.set(CUSTOMER_SESSION_COOKIE, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 0,
   });
 
   return response;
