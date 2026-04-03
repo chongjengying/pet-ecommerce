@@ -37,6 +37,11 @@ function isMissingRoleColumnError(error: unknown): boolean {
   return message.includes("role") && message.includes("column");
 }
 
+function isMissingProfilesTable(error: unknown): boolean {
+  const message = String((error as { message?: string })?.message ?? "").toLowerCase();
+  return message.includes("profiles") && (message.includes("does not exist") || message.includes("could not find"));
+}
+
 async function queryUserByEmailOrUsername(
   supabase: ReturnType<typeof getSupabaseServerClient>,
   identifier: string
@@ -50,7 +55,7 @@ async function queryUserByEmailOrUsername(
       .limit(1);
     if (byEmail.error) return { rows: null as Record<string, unknown>[] | null, error: byEmail.error };
     if (Array.isArray(byEmail.data) && byEmail.data.length > 0) {
-      return { rows: byEmail.data as Record<string, unknown>[], error: null };
+      return { rows: byEmail.data as unknown as Record<string, unknown>[], error: null };
     }
 
     const byUsername = await supabase
@@ -60,7 +65,7 @@ async function queryUserByEmailOrUsername(
       .order("id", { ascending: true })
       .limit(1);
     if (byUsername.error) return { rows: null as Record<string, unknown>[] | null, error: byUsername.error };
-    return { rows: (byUsername.data as Record<string, unknown>[] | null) ?? null, error: null };
+    return { rows: (byUsername.data as unknown as Record<string, unknown>[] | null) ?? null, error: null };
   };
 
   const firstAttempt = await select(USER_SELECT_WITH_ROLE);
@@ -131,6 +136,9 @@ export async function POST(request: Request) {
       .order("user_id", { ascending: true })
       .limit(1);
     if (profileLookupError) {
+      if (isMissingProfilesTable(profileLookupError)) {
+        return NextResponse.json({ error: "Invalid username/email or password." }, { status: 401 });
+      }
       return NextResponse.json({ error: profileLookupError.message || "Could not validate login." }, { status: 400 });
     }
     const profileUserId = Array.isArray(profileRows) && profileRows.length > 0 ? profileRows[0]?.user_id : null;

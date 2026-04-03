@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMemo, useState } from "react";
 import AdminLogoutButton from "@/components/admin/AdminLogoutButton";
+import { useAdminAuth } from "@/components/admin/AdminAuthProvider";
 
 type NavItem = {
   href: string;
@@ -76,12 +77,21 @@ function Sidebar({ close }: { close?: () => void }) {
 export default function AdminShell({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
+  const { profile, loading } = useAdminAuth();
   const pageTitle = useMemo(() => {
     const match = navItems.find((item) =>
       item.href === "/admin" ? pathname === "/admin" : pathname.startsWith(item.href)
     );
     return match?.label ?? "Dashboard";
   }, [pathname]);
+  const displayName = profile?.username?.trim() || "Admin";
+  const displayEmail = profile?.email?.trim() || "admin@pawluxe.com";
+  const avatarInitials = displayName
+    .split(/[\s._-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("") || "A";
 
   return (
     <div className="min-h-screen bg-[#f6f5f1]">
@@ -127,13 +137,33 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
               </svg>
             </button>
             <div className="hidden items-center gap-3 rounded-2xl border border-zinc-200 px-3 py-1.5 sm:flex">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-xs font-semibold text-emerald-700">
-                PA
-              </div>
-              <div className="text-xs">
-                <p className="font-semibold text-zinc-900">Pawluxe Team</p>
-                <p className="text-zinc-500">admin@pawluxe.com</p>
-              </div>
+              {loading ? (
+                <>
+                  <span className="h-8 w-8 animate-pulse rounded-full bg-zinc-200" />
+                  <div className="space-y-1.5">
+                    <p className="h-2.5 w-24 animate-pulse rounded bg-zinc-200" />
+                    <p className="h-2.5 w-32 animate-pulse rounded bg-zinc-100" />
+                  </div>
+                </>
+              ) : (
+                <>
+                  {profile?.avatar_url ? (
+                    <img
+                      src={profile.avatar_url}
+                      alt={displayName}
+                      className="h-8 w-8 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-xs font-semibold text-emerald-700">
+                      {avatarInitials}
+                    </div>
+                  )}
+                  <div className="text-xs">
+                    <p className="font-semibold text-zinc-900">{displayName}</p>
+                    <p className="text-zinc-500">{displayEmail}</p>
+                  </div>
+                </>
+              )}
             </div>
             <AdminLogoutButton />
           </div>

@@ -27,26 +27,30 @@ export default function CustomerLoginForm() {
       return;
     }
 
-    const res = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ identifier: normalizedIdentifier, password }),
-    });
-    const payload = (await res.json().catch(() => ({}))) as { error?: string; token?: string };
-    if (!res.ok) {
-      setError(payload.error || "Login failed. Please try again.");
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identifier: normalizedIdentifier, password }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { error?: string; token?: string };
+      if (!res.ok) {
+        setError(payload.error || "Login failed. Please try again.");
+        return;
+      }
+
+      if (payload.token) {
+        localStorage.setItem("customer_jwt_token", payload.token);
+        window.dispatchEvent(new Event("customer-auth-changed"));
+      }
+
+      router.replace(redirectTo);
+      router.refresh();
+    } catch {
+      setError("Login failed. Please try again.");
+    } finally {
       setLoading(false);
-      return;
     }
-
-    if (payload.token) {
-      localStorage.setItem("customer_jwt_token", payload.token);
-      window.dispatchEvent(new Event("customer-auth-changed"));
-    }
-
-    setLoading(false);
-    router.replace(redirectTo);
-    router.refresh();
   };
 
   return (

@@ -9,7 +9,6 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   const secret = process.env.ADMIN_SESSION_SECRET?.trim() ?? "";
-  const password = process.env.ADMIN_PASSWORD?.trim() ?? "";
 
   const isApiAdmin = pathname.startsWith("/api/admin");
   const isPageAdmin = pathname.startsWith("/admin");
@@ -23,9 +22,9 @@ export async function middleware(request: NextRequest) {
   }
 
   if (isApiAdmin) {
-    if (!secret || !password) {
+    if (!secret) {
       return NextResponse.json(
-        { error: "Admin auth not configured. Set ADMIN_PASSWORD and ADMIN_SESSION_SECRET." },
+        { error: "Admin auth not configured. Set ADMIN_SESSION_SECRET." },
         { status: 503 }
       );
     }
@@ -38,13 +37,13 @@ export async function middleware(request: NextRequest) {
 
   if (pathname.startsWith("/admin/login")) {
     const token = request.cookies.get(ADMIN_SESSION_COOKIE)?.value;
-    if (secret && password && token && (await verifyAdminSessionToken(token, secret))) {
+    if (secret && token && (await verifyAdminSessionToken(token, secret))) {
       return NextResponse.redirect(new URL("/admin", request.url));
     }
     return NextResponse.next();
   }
 
-  if (!secret || !password) {
+  if (!secret) {
     const url = request.nextUrl.clone();
     url.pathname = "/admin/login";
     url.searchParams.set("config", "1");

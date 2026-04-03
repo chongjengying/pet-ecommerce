@@ -29,19 +29,32 @@ export default function Navbar() {
     let active = true;
 
     const syncAuthState = async () => {
-      setAuthLoading(true);
-      const res = await fetch("/api/auth/me", { method: "GET" });
-      if (!active) return;
-      if (!res.ok) {
+      try {
+        setAuthLoading(true);
+        const token = typeof window !== "undefined" ? localStorage.getItem("customer_jwt_token") : null;
+        const res = await fetch("/api/auth/me", {
+          method: "GET",
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
+        if (!active) return;
+        if (!res.ok) {
+          setIsAuthenticated(false);
+          setUsername("");
+          return;
+        }
+        const payload = (await res.json().catch(() => ({}))) as { user?: { username?: string } };
+        setIsAuthenticated(true);
+        setUsername(payload.user?.username ?? "");
+      } catch {
+        if (!active) return;
         setIsAuthenticated(false);
         setUsername("");
+      } finally {
+        if (!active) return;
         setAuthLoading(false);
-        return;
       }
-      const payload = (await res.json().catch(() => ({}))) as { user?: { username?: string } };
-      setIsAuthenticated(true);
-      setUsername(payload.user?.username ?? "");
-      setAuthLoading(false);
     };
     void syncAuthState();
 

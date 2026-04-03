@@ -42,9 +42,7 @@ export async function verifyAdminSessionToken(token: string, secret: string): Pr
   return timingSafeEqualHex(sig, expected);
 }
 
-export function getAdminAuthEnv(): { password: string; sessionSecret: string } | null {
-  const password = process.env.ADMIN_PASSWORD?.trim() ?? "";
+export function getAdminSessionSecret(): string | null {
   const sessionSecret = process.env.ADMIN_SESSION_SECRET?.trim() ?? "";
-  if (!password || !sessionSecret) return null;
-  return { password, sessionSecret };
+  return sessionSecret || null;
 }

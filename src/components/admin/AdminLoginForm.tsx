@@ -11,7 +11,9 @@ export default function AdminLoginForm() {
   const nextPath = searchParams.get("next") ?? "/admin";
   const configMissing = searchParams.get("config") === "1";
 
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -19,17 +21,26 @@ export default function AdminLoginForm() {
     e.preventDefault();
     setError(null);
     setLoading(true);
+
+    const normalizedIdentifier = identifier.trim().toLowerCase();
+    if (!normalizedIdentifier || !password) {
+      setError("Username/email and password are required.");
+      setLoading(false);
+      return;
+    }
+
     try {
-      const res = await fetch("/api/admin/auth/login", {
+      const sessionRes = await fetch("/api/admin/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ identifier: normalizedIdentifier, password }),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(typeof data?.error === "string" ? data.error : "Sign in failed.");
+      const sessionPayload = (await sessionRes.json().catch(() => ({}))) as { error?: string };
+      if (!sessionRes.ok) {
+        setError(sessionPayload.error || "Sign in failed.");
         return;
       }
+
       router.replace(nextPath.startsWith("/admin") ? nextPath : "/admin");
       router.refresh();
     } catch {
@@ -40,57 +51,93 @@ export default function AdminLoginForm() {
   };
 
   return (
-    <div className="flex flex-1 flex-col items-center justify-center px-6 py-12">
-      <div className="w-full max-w-[380px]">
-        <div className="mb-10 text-center">
-          <p className="text-[13px] font-semibold tracking-[0.2em] text-neutral-400">PAWLUXE</p>
-          <h1 className="mt-3 text-[28px] font-semibold tracking-tight text-neutral-900">Admin</h1>
-          <p className="mt-2 text-[15px] leading-snug text-neutral-500">Sign in to manage your store.</p>
+    <div className="relative flex flex-1 items-center justify-center overflow-hidden bg-[#f3f5f9] px-5 py-10 sm:px-8">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute left-[-8rem] top-[-8rem] h-72 w-72 rounded-full bg-[#c9d7ff]/45 blur-3xl" />
+        <div className="absolute bottom-[-9rem] right-[-6rem] h-80 w-80 rounded-full bg-[#a9c0ff]/35 blur-3xl" />
+      </div>
+
+      <div className="relative w-full max-w-[460px] rounded-3xl border border-[#dbe3f2] bg-white/90 p-6 shadow-[0_24px_70px_rgba(15,23,42,0.16)] backdrop-blur sm:p-8">
+        <div className="mb-8 flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#0f172a] text-white shadow-[0_8px_20px_rgba(15,23,42,0.35)]">
+            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 3.5l7 3.5v5.5c0 4.25-2.83 7.62-7 8.5-4.17-.88-7-4.25-7-8.5V7l7-3.5z" stroke="currentColor" strokeWidth="1.8" />
+              <path d="M9.25 12l1.8 1.8 3.7-3.7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#52607a]">PAWLUXE</p>
+            <h1 className="text-[27px] font-semibold leading-none tracking-tight text-[#101828]">Admin Console</h1>
+          </div>
         </div>
 
-        <div className="rounded-2xl border border-black/[0.06] bg-white/80 px-8 py-9 shadow-[0_2px_24px_rgba(0,0,0,0.06)] backdrop-blur-xl">
-          {configMissing ? (
-            <p className="mb-6 rounded-xl bg-amber-50 px-3 py-2.5 text-center text-[13px] leading-relaxed text-amber-900/90">
-              Set <span className="font-mono text-[12px]">ADMIN_PASSWORD</span> and{" "}
-              <span className="font-mono text-[12px]">ADMIN_SESSION_SECRET</span> in{" "}
-              <span className="font-mono text-[12px]">.env.local</span>, then restart the dev server.
-            </p>
-          ) : null}
+        <p className="mb-6 rounded-2xl border border-[#e3eaf8] bg-[#f8fbff] px-4 py-3 text-[13px] leading-relaxed text-[#4b5c78]">
+          Sign in using an account with <span className="font-semibold text-[#1e293b]">profiles.role = admin</span>.
+        </p>
 
-          <form onSubmit={onSubmit} className="space-y-5">
-            <label className="block">
-              <span className="mb-2 block text-[13px] font-medium text-neutral-800">Password</span>
+        {configMissing ? (
+          <p className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-center text-[13px] leading-relaxed text-amber-900/90">
+            Set <span className="font-mono text-[12px]">ADMIN_SESSION_SECRET</span> in{" "}
+            <span className="font-mono text-[12px]">.env.local</span>, then restart the dev server.
+          </p>
+        ) : null}
+
+        <form onSubmit={onSubmit} className="space-y-4">
+          <label className="block">
+            <span className="mb-1.5 block text-[13px] font-semibold text-[#334155]">Username or Email</span>
+            <input
+              type="text"
+              name="identifier"
+              autoComplete="username"
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
+              className="w-full rounded-xl border border-[#d7deea] bg-white px-3.5 py-3 text-[16px] text-[#0f172a] outline-none transition focus:border-[#8ea5d9] focus:ring-4 focus:ring-[#d8e4ff]"
+              placeholder="admin@example.com"
+              required
+            />
+          </label>
+
+          <label className="block">
+            <span className="mb-1.5 block text-[13px] font-semibold text-[#334155]">Password</span>
+            <div className="flex items-center rounded-xl border border-[#d7deea] bg-white pr-2 focus-within:border-[#8ea5d9] focus-within:ring-4 focus-within:ring-[#d8e4ff]">
               <input
-                type="password"
+                type={showPassword ? "text" : "password"}
                 name="password"
                 autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-[10px] border border-neutral-200 bg-white px-3.5 py-3 text-[17px] text-neutral-900 shadow-inner outline-none ring-0 transition placeholder:text-neutral-300 focus:border-neutral-400 focus:ring-2 focus:ring-neutral-900/8"
+                className="w-full rounded-xl bg-transparent px-3.5 py-3 text-[16px] text-[#0f172a] outline-none"
                 placeholder="Enter your password"
                 required
               />
-            </label>
+              <button
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                className="rounded-lg px-2 py-1 text-xs font-medium text-[#475569] transition hover:bg-[#eef3ff]"
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
+          </label>
 
-            {error ? (
-              <p className="text-center text-[13px] text-red-600" role="alert">
-                {error}
-              </p>
-            ) : null}
+          {error ? (
+            <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-center text-[13px] text-red-700" role="alert">
+              {error}
+            </p>
+          ) : null}
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex w-full items-center justify-center rounded-[10px] bg-[#1d1d1f] py-3 text-[15px] font-semibold text-white transition hover:bg-[#000] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {loading ? "Signing in..." : "Continue"}
-            </button>
-          </form>
-        </div>
+          <button
+            type="submit"
+            disabled={loading}
+            className="mt-2 flex w-full items-center justify-center rounded-xl bg-[#111827] py-3 text-[15px] font-semibold text-white transition hover:bg-[#0b1220] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {loading ? "Signing in..." : "Sign in to Admin"}
+          </button>
+        </form>
 
-        <p className="mt-8 text-center text-[12px] text-neutral-400">
-          <Link href="/" className="text-neutral-500 underline-offset-4 hover:text-neutral-700 hover:underline">
-            Back to store
+        <p className="mt-7 text-center text-[12px] text-[#64748b]">
+          <Link href="/" className="font-medium text-[#475569] underline-offset-4 transition hover:text-[#0f172a] hover:underline">
+            Back to storefront
           </Link>
         </p>
       </div>

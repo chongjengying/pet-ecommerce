@@ -108,6 +108,9 @@ async function resolveSessionUser(
     .ilike("username", session.username)
     .order("user_id", { ascending: true })
     .limit(1);
+  if (profileMatch.error && !isMissingProfilesTable(profileMatch.error)) {
+    return null;
+  }
   const matchedUserId =
     Array.isArray(profileMatch.data) && profileMatch.data.length > 0
       ? profileMatch.data[0]?.user_id
@@ -174,7 +177,7 @@ export async function GET(request: Request) {
 
   if (!profileData) {
     // Backfill profile identity fields for older users who predate profiles rows.
-    await supabase.from("profiles").upsert(
+    const { error: backfillError } = await supabase.from("profiles").upsert(
       {
         user_id: Number(data.id),
         username: data.username,
@@ -182,6 +185,9 @@ export async function GET(request: Request) {
       },
       { onConflict: "user_id" }
     );
+    if (backfillError && !isMissingProfilesTable(backfillError)) {
+      return NextResponse.json({ error: backfillError.message || "Could not load profile details." }, { status: 400 });
+    }
   }
 
   return NextResponse.json({

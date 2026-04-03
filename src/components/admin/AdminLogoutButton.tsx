@@ -1,22 +1,9 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useAdminAuth } from "@/components/admin/AdminAuthProvider";
 
 export default function AdminLogoutButton() {
-  const router = useRouter();
-  const [loading, setLoading] = useState(false);
-
-  const logout = async () => {
-    setLoading(true);
-    try {
-      await fetch("/api/admin/auth/logout", { method: "POST" });
-      router.replace("/admin/login");
-      router.refresh();
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { logout, loading } = useAdminAuth();
 
   return (
     <button

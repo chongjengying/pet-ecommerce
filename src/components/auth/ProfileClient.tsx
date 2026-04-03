@@ -12,7 +12,6 @@ type ProfileUser = {
   phone?: string | null;
   gender?: string | null;
   dob?: string | null;
-  role: string;
 };
 
 function getInitials(source: string): string {
@@ -40,60 +39,68 @@ export default function ProfileClient() {
     let active = true;
 
     const loadUser = async () => {
-      const token = typeof window !== "undefined" ? localStorage.getItem("customer_jwt_token") : null;
-      const res = await fetch("/api/profile", {
-        method: "GET",
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      });
-      if (!active) return;
-
-      if (!res.ok) {
-        if (res.status === 401) {
-          router.replace("/auth/login?next=/profile");
-          return;
-        }
+      try {
+        setError(null);
         const token = typeof window !== "undefined" ? localStorage.getItem("customer_jwt_token") : null;
-        const meRes = await fetch("/api/auth/me", {
+        const res = await fetch("/api/profile", {
           method: "GET",
           headers: {
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
         });
-        if (meRes.ok) {
-          const mePayload = (await meRes.json().catch(() => ({}))) as { user?: Partial<ProfileUser> };
-          if (mePayload.user?.email && mePayload.user?.username) {
-            setUser({
-              id: String(mePayload.user.id ?? ""),
-              email: String(mePayload.user.email),
-              username: String(mePayload.user.username),
-              full_name: mePayload.user.full_name ?? null,
-              role: String(mePayload.user.role ?? "customer"),
-              avatar_url: null,
-              phone: null,
-              gender: null,
-              dob: null,
-            });
-            setNotice("Profile details are not fully available yet. Please complete setup and save your profile.");
-            setLoading(false);
+        if (!active) return;
+
+        if (!res.ok) {
+          if (res.status === 401) {
+            router.replace("/auth/login?next=/profile");
             return;
           }
+          const token = typeof window !== "undefined" ? localStorage.getItem("customer_jwt_token") : null;
+          const meRes = await fetch("/api/auth/me", {
+            method: "GET",
+            headers: {
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+          });
+          if (!active) return;
+          if (meRes.ok) {
+            const mePayload = (await meRes.json().catch(() => ({}))) as { user?: Partial<ProfileUser> };
+            if (mePayload.user?.email && mePayload.user?.username) {
+              setUser({
+                id: String(mePayload.user.id ?? ""),
+                email: String(mePayload.user.email),
+                username: String(mePayload.user.username),
+                full_name: mePayload.user.full_name ?? null,
+                avatar_url: null,
+                phone: null,
+                gender: null,
+                dob: null,
+              });
+              setNotice("Profile details are not fully available yet. Please complete setup and save your profile.");
+              return;
+            }
+          }
+          const failure = (await res.json().catch(() => ({}))) as { error?: string };
+          setError(failure.error || "Could not load profile.");
+          return;
         }
-        const failure = (await res.json().catch(() => ({}))) as { error?: string };
-        setError(failure.error || "Could not load profile.");
-        setLoading(false);
-        return;
-      }
 
-      const payload = (await res.json().catch(() => ({}))) as { user?: ProfileUser };
-      if (!payload.user) {
-        router.replace("/auth/login?next=/profile");
-        return;
-      }
+        const payload = (await res.json().catch(() => ({}))) as { user?: ProfileUser };
+        if (!payload.user) {
+          router.replace("/auth/login?next=/profile");
+          return;
+        }
 
-      setUser(payload.user);
-      setLoading(false);
+        setNotice(null);
+        setUser(payload.user);
+      } catch {
+        if (!active) return;
+        setError("Could not load profile.");
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
     };
 
     void loadUser();
@@ -123,25 +130,30 @@ export default function ProfileClient() {
       dob: formData.get("dob")?.toString() ?? "",
     };
 
-    const token = typeof window !== "undefined" ? localStorage.getItem("customer_jwt_token") : null;
-    const res = await fetch("/api/profile", {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify(payload),
-    });
-    const data = (await res.json().catch(() => ({}))) as { error?: string; user?: ProfileUser };
-    if (!res.ok || !data.user) {
-      setError(data.error || "Could not save profile.");
-      setSaving(false);
-      return;
-    }
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("customer_jwt_token") : null;
+      const res = await fetch("/api/profile", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string; user?: ProfileUser };
+      if (!res.ok || !data.user) {
+        setError(data.error || "Could not save profile.");
+        return;
+      }
 
-    setUser(data.user);
-    setSuccess("Profile updated");
-    setSaving(false);
+      setNotice(null);
+      setUser(data.user);
+      setSuccess("Profile updated");
+    } catch {
+      setError("Could not save profile.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (loading) {
@@ -199,7 +211,7 @@ export default function ProfileClient() {
           void onSave(fd);
         }}
       >
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2">
           <div className="rounded-2xl border border-amber-100 bg-cream/60 p-4">
             <p className="text-xs uppercase tracking-[0.18em] text-umber/60">Email</p>
             <p className="mt-2 text-sm font-medium text-umber">{user?.email || "No email on file"}</p>
@@ -207,10 +219,6 @@ export default function ProfileClient() {
           <div className="rounded-2xl border border-amber-100 bg-cream/60 p-4">
             <p className="text-xs uppercase tracking-[0.18em] text-umber/60">Username</p>
             <p className="mt-2 text-sm font-medium text-umber">@{user?.username}</p>
-          </div>
-          <div className="rounded-2xl border border-amber-100 bg-cream/60 p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-umber/60">Role</p>
-            <p className="mt-2 text-sm font-medium capitalize text-umber">{user?.role ?? "customer"}</p>
           </div>
         </div>
 
