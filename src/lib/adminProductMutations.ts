@@ -328,6 +328,61 @@ export async function syncProductImageSafely(payload: Record<string, unknown>) {
   return false;
 }
 
+export async function syncProductGalleryImages(
+  productId: string | number,
+  imageUrls: string[]
+) {
+  const db = getServerWriteClient();
+  const pid = coerceProductId(String(productId));
+  const table = "product_images";
+  const uniqueUrls = Array.from(
+    new Set(
+      imageUrls
+        .map((url) => String(url ?? "").trim())
+        .filter((url) => url.length > 0)
+    )
+  );
+
+  const { error: deleteError } = await db.from(table).delete().eq("product_id", pid);
+  const deleteMessage = typeof deleteError?.message === "string" ? deleteError.message : "";
+  const missingRelation =
+    deleteMessage.includes("Could not find the table") ||
+    deleteMessage.includes("relation") ||
+    deleteMessage.includes("does not exist");
+  if (deleteError && !missingRelation) {
+    throw new Error(deleteMessage || "Could not clear product gallery images.");
+  }
+  if (missingRelation) {
+    return false;
+  }
+  if (uniqueUrls.length === 0) return true;
+
+  for (let index = 0; index < uniqueUrls.length; index++) {
+    const insertPayload: Record<string, unknown> = {
+      product_id: pid,
+      image_url: uniqueUrls[index],
+      is_main: index === 0,
+      sort_order: index,
+    };
+
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const { error } = await db.from(table).insert(insertPayload);
+      if (!error) break;
+      const message =
+        typeof error.message === "string" ? error.message : JSON.stringify(error);
+      const missingColumnMatch = message.match(/Could not find the '([^']+)' column/i);
+      const missingColumn = missingColumnMatch?.[1];
+      if (missingColumn && missingColumn in insertPayload) {
+        delete insertPayload[missingColumn];
+        continue;
+      }
+      throw new Error(message);
+    }
+  }
+
+  return true;
+}
+
 export async function deleteProductImagesForProduct(productId: string | number) {
   const db = getServerWriteClient();
   const pid = coerceProductId(String(productId));

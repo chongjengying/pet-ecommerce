@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   insertProductSafely,
   resolveOrCreateCategoryId,
+  syncProductGalleryImages,
   syncProductImageSafely,
 } from "@/lib/adminProductMutations";
 
@@ -27,6 +28,8 @@ export async function POST(request: Request) {
       benefit?: string | null;
       ingredients?: string | null;
       feeding_instructions?: string | null;
+      description?: string | null;
+      gallery_images?: string[] | null;
     };
 
     const name = String(body?.name ?? "").trim();
@@ -41,6 +44,11 @@ export async function POST(request: Request) {
         ? 0
         : Number(body.stock);
     const imageUrl = body?.image_url ? String(body.image_url) : null;
+    const galleryImages = Array.isArray(body?.gallery_images)
+      ? body.gallery_images.map((value) => String(value ?? "").trim()).filter(Boolean)
+      : imageUrl
+        ? [imageUrl]
+        : [];
 
     if (!name) {
       return NextResponse.json({ error: "Name is required." }, { status: 400 });
@@ -71,28 +79,20 @@ export async function POST(request: Request) {
         benefit: optionalText(body.benefit),
         ingredients: optionalText(body.ingredients),
         feeding_instructions: optionalText(body.feeding_instructions),
+        description: optionalText(body.description),
       },
       ["name", "price", "stock"]
     );
 
-    if (imageUrl) {
-      const productId = (created as { id?: string | number })?.id;
-      if (productId == null || productId === "") {
-        throw new Error("Product created but missing product id for product_image insert.");
-      }
-
-      const imageInserted = await syncProductImageSafely({
-        product_id: productId,
-        image_url: imageUrl,
-        is_main: true,
-        sort_order: 0,
-      });
-      if (!imageInserted) {
-        return NextResponse.json({
-          success: true,
-          product: created,
-          warning:
-            "Product created, but image table not found (expected public.product_images).",
+    const productId = (created as { id?: string | number })?.id;
+    if (productId != null && productId !== "" && galleryImages.length > 0) {
+      const gallerySynced = await syncProductGalleryImages(productId, galleryImages);
+      if (!gallerySynced && imageUrl) {
+        await syncProductImageSafely({
+          product_id: productId,
+          image_url: imageUrl,
+          is_main: true,
+          sort_order: 0,
         });
       }
     }

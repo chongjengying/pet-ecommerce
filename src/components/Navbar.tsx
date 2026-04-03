@@ -2,19 +2,96 @@
 
 import Link from "next/link";
 import { useCart } from "@/context/CartContext";
-import { useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const navLinks = [
   { href: "/", label: "Home" },
   { href: "/products", label: "Products" },
   { href: "/grooming", label: "Dog Grooming" },
+  { href: "/profile", label: "Profile" },
   { href: "/cart", label: "Cart" },
 ];
 
 export default function Navbar() {
+  const router = useRouter();
+  const pathname = usePathname();
   const { cartCount, openCartFlyout } = useCart();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [logoBroken, setLogoBroken] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [username, setUsername] = useState<string>("");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    const syncAuthState = async () => {
+      setAuthLoading(true);
+      const res = await fetch("/api/auth/me", { method: "GET" });
+      if (!active) return;
+      if (!res.ok) {
+        setIsAuthenticated(false);
+        setUsername("");
+        setAuthLoading(false);
+        return;
+      }
+      const payload = (await res.json().catch(() => ({}))) as { user?: { username?: string } };
+      setIsAuthenticated(true);
+      setUsername(payload.user?.username ?? "");
+      setAuthLoading(false);
+    };
+    void syncAuthState();
+
+    const onAuthChanged = () => {
+      void syncAuthState();
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === "customer_jwt_token") {
+        void syncAuthState();
+      }
+    };
+
+    window.addEventListener("customer-auth-changed", onAuthChanged);
+    window.addEventListener("storage", onStorage);
+
+    return () => {
+      active = false;
+      window.removeEventListener("customer-auth-changed", onAuthChanged);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [pathname]);
+
+  useEffect(() => {
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!menuRef.current) return;
+      if (!menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    return () => document.removeEventListener("mousedown", closeOnOutsideClick);
+  }, []);
+
+  const onLogout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    localStorage.removeItem("customer_jwt_token");
+    window.dispatchEvent(new Event("customer-auth-changed"));
+    setIsAuthenticated(false);
+    setUsername("");
+    setMenuOpen(false);
+    router.replace("/");
+    router.refresh();
+  };
+
+  const initials = useMemo(() => {
+    const source = username.trim();
+    if (!source) return "U";
+    const parts = source.split(/[._\s-]+/).filter(Boolean).slice(0, 2);
+    return parts.map((part) => part[0]?.toUpperCase() ?? "").join("") || source.charAt(0).toUpperCase();
+  }, [username]);
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-amber-200/60 bg-cream/95 backdrop-blur supports-[backdrop-filter]:bg-cream/80">
@@ -50,6 +127,47 @@ export default function Navbar() {
               </Link>
             </li>
           ))}
+          <li>
+            {authLoading ? (
+              <span className="inline-block h-8 w-20 animate-pulse rounded-xl bg-amber-100" />
+            ) : isAuthenticated ? (
+              <div className="relative" ref={menuRef}>
+                <button
+                  type="button"
+                  onClick={() => setMenuOpen((prev) => !prev)}
+                  className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100 text-sm font-semibold text-umber ring-1 ring-amber-200 transition hover:bg-amber-200"
+                  aria-label="Open profile menu"
+                >
+                  {initials}
+                </button>
+                <div
+                  className={`absolute right-0 mt-2 w-48 origin-top-right rounded-2xl border border-amber-100 bg-white p-2 shadow-xl transition duration-200 ${
+                    menuOpen ? "translate-y-0 opacity-100" : "pointer-events-none -translate-y-1 opacity-0"
+                  }`}
+                >
+                  <p className="px-3 py-2 text-sm font-semibold text-umber">@{username || "customer"}</p>
+                  <Link
+                    href="/profile"
+                    onClick={() => setMenuOpen(false)}
+                    className="block rounded-xl px-3 py-2 text-sm text-umber/90 transition hover:bg-amber-50"
+                  >
+                    Profile
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => void onLogout()}
+                    className="w-full rounded-xl px-3 py-2 text-left text-sm text-umber/90 transition hover:bg-amber-50"
+                  >
+                    Logout
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <Link href="/auth/login" className="text-sm font-medium text-umber/80 transition hover:text-umber">
+                Login
+              </Link>
+            )}
+          </li>
           <li>
             <button
               type="button"
@@ -130,6 +248,31 @@ export default function Navbar() {
                 </Link>
               </li>
             ))}
+            <li>
+              {!isAuthenticated ? (
+                <Link
+                  href="/auth/login"
+                  onClick={() => setMobileOpen(false)}
+                  className="block rounded-lg px-3 py-2 text-sm font-medium text-umber hover:bg-amber-100"
+                >
+                  Login
+                </Link>
+              ) : null}
+            </li>
+            {isAuthenticated ? (
+              <li>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileOpen(false);
+                    void onLogout();
+                  }}
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm font-medium text-umber hover:bg-amber-100"
+                >
+                  Logout
+                </button>
+              </li>
+            ) : null}
           </ul>
         </div>
       )}
