@@ -1,4 +1,5 @@
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
+import { userIdForDbQuery } from "@/lib/userIdDb";
 
 type SupabaseClient = ReturnType<typeof getSupabaseServerClient>;
 
@@ -31,7 +32,7 @@ export async function resolveProfileRole(
   const byUserId = await supabase
     .from("profiles")
     .select("role")
-    .eq("user_id", Number(userId))
+    .eq("user_id", userIdForDbQuery(userId))
     .maybeSingle();
   if (!byUserId.error) {
     const roleValue = byUserId.data && typeof byUserId.data.role === "string" ? byUserId.data.role : null;
@@ -50,7 +51,7 @@ export async function resolveProfileRole(
   const byId = await supabase
     .from("profiles")
     .select("role")
-    .eq("id", Number(userId))
+    .eq("id", userIdForDbQuery(userId))
     .maybeSingle();
   if (byId.error) {
     if (isMissingProfilesTable(byId.error)) {

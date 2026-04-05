@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { adminAccessDeniedResponse, verifyAdminAccess } from "@/lib/adminGate";
 import {
   insertProductSafely,
   resolveOrCreateCategoryId,
@@ -13,6 +14,9 @@ function optionalText(v: unknown): string | null {
 }
 
 export async function POST(request: Request) {
+  const gate = await verifyAdminAccess();
+  if (!gate.ok) return adminAccessDeniedResponse(gate);
+
   try {
     const body = (await request.json()) as {
       name?: string;

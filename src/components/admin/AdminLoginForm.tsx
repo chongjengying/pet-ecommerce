@@ -3,19 +3,34 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export default function AdminLoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextPath = searchParams.get("next") ?? "/admin";
   const configMissing = searchParams.get("config") === "1";
+  const forbidden = searchParams.get("forbidden") === "1";
 
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (forbidden || configMissing) return;
+    let active = true;
+    void (async () => {
+      const res = await fetch("/api/admin/auth/me", { credentials: "include", cache: "no-store" });
+      if (!active || !res.ok) return;
+      const dest = nextPath.startsWith("/admin") ? nextPath : "/admin";
+      router.replace(dest);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [configMissing, forbidden, nextPath, router]);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,6 +89,13 @@ export default function AdminLoginForm() {
         <p className="mb-6 rounded-2xl border border-[#e3eaf8] bg-[#f8fbff] px-4 py-3 text-[13px] leading-relaxed text-[#4b5c78]">
           Sign in using an account with <span className="font-semibold text-[#1e293b]">profiles.role = admin</span>.
         </p>
+
+        {forbidden ? (
+          <p className="mb-6 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-center text-[13px] leading-relaxed text-red-800" role="alert">
+            Admin access only. This account is not allowed to open the admin console. Sign in with an account that has{" "}
+            <span className="font-semibold">admin</span> role in profiles.
+          </p>
+        ) : null}
 
         {configMissing ? (
           <p className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-center text-[13px] leading-relaxed text-amber-900/90">

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { adminAccessDeniedResponse, verifyAdminAccess } from "@/lib/adminGate";
 import { getServerWriteClient } from "@/lib/adminProductMutations";
 
 const allowedStatuses = new Set(["pending", "paid", "shipped"]);
@@ -7,6 +8,9 @@ export async function PUT(
   request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
+  const gate = await verifyAdminAccess();
+  if (!gate.ok) return adminAccessDeniedResponse(gate);
+
   try {
     const { id } = await context.params;
     if (!id) {

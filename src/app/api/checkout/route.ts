@@ -1,4 +1,11 @@
 import { NextResponse } from "next/server";
+import { getCustomerFromRequest } from "@/lib/customerJwt";
+import { getSupabaseServerClient } from "@/lib/supabaseServer";
+import {
+  fetchUserAddresses,
+  getDefaultUserAddress,
+  isCompleteShippingAddress,
+} from "@/lib/userAddressDb";
 import { decrementStock } from "@/services/productService";
 import { createOrder } from "@/services/orderService";
 
@@ -16,6 +23,39 @@ function normalizeQty(value: unknown): number {
 }
 
 export async function POST(request: Request) {
+  const session = await getCustomerFromRequest(request);
+  if (!session) {
+    return NextResponse.json(
+      {
+        error:
+          "Sign in to place an order. Add a full shipping address on your profile (line 1, city, state, postal code, country) before checkout.",
+      },
+      { status: 401 }
+    );
+  }
+
+  let supabase;
+  try {
+    supabase = getSupabaseServerClient();
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Checkout is not configured." },
+      { status: 503 }
+    );
+  }
+
+  const addresses = await fetchUserAddresses(supabase, session.sub);
+  const shipTo = getDefaultUserAddress(addresses);
+  if (!shipTo || !isCompleteShippingAddress(shipTo)) {
+    return NextResponse.json(
+      {
+        error:
+          "Add a complete shipping address on your profile before checkout (line 1, city, state, postal code, country).",
+      },
+      { status: 400 }
+    );
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -62,11 +102,23 @@ export async function POST(request: Request) {
   let createdOrder: Awaited<ReturnType<typeof createOrder>> | null = null;
   try {
     createdOrder = await createOrder(orderItems, {
+      user_id: session.sub,
       subtotal,
       shipping_fee: 0,
       tax_amount: 0,
       currency: "MYR",
-      metadata: { item_count: orderItems.length },
+      metadata: {
+        item_count: orderItems.length,
+        shipping: {
+          label: shipTo.label,
+          line1: shipTo.line1,
+          line2: shipTo.line2,
+          city: shipTo.city,
+          state: shipTo.state,
+          postal_code: shipTo.postal_code,
+          country: shipTo.country,
+        },
+      },
     });
   } catch (orderErr) {
     const msg =

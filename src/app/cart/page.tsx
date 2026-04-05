@@ -10,14 +10,20 @@ export default function CartPage() {
   const [checkingOut, setCheckingOut] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [checkoutSuccess, setCheckoutSuccess] = useState(false);
+  const [checkoutSignInHint, setCheckoutSignInHint] = useState(false);
 
   const handleCheckout = async () => {
     setCheckoutError(null);
+    setCheckoutSignInHint(false);
     setCheckingOut(true);
     try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("customer_jwt_token") : null;
       const res = await fetch("/api/checkout", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           items: items.map((i) => ({
             id: i.id,
@@ -30,6 +36,7 @@ export default function CartPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setCheckoutError(data?.error ?? "Checkout failed");
+        setCheckoutSignInHint(!token || res.status === 401);
         return;
       }
       clearCart();
@@ -154,8 +161,16 @@ export default function CartPage() {
           </div>
           <p className="mt-2 text-sm text-umber/60">Shipping and tax calculated at checkout.</p>
           {checkoutError && (
-            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700">
-              {checkoutError}
+            <div className="mt-4 space-y-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700">
+              <p>{checkoutError}</p>
+              {checkoutSignInHint ? (
+                <p className="text-xs font-normal text-red-800/90">
+                  <Link href="/auth/login?next=/profile" className="font-semibold underline underline-offset-2">
+                    Sign in
+                  </Link>{" "}
+                  and save your shipping address on your profile before checking out.
+                </p>
+              ) : null}
             </div>
           )}
           <button

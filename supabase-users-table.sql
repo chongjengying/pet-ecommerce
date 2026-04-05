@@ -1,4 +1,5 @@
 -- Custom users table for app-managed auth (not Supabase Auth).
+-- NOTE: For new installs prefer `supabase-schema-users-profiles-uuid.sql` (UUID primary keys + linked profiles + addresses).
 -- Password is stored as plain text for now (not recommended for production).
 create table if not exists public.users (
   id bigserial primary key,

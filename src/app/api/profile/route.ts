@@ -1,11 +1,17 @@
 import { NextResponse } from "next/server";
 import { getCustomerFromRequest } from "@/lib/customerJwt";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
+import {
+  fetchUserAddresses,
+  isMissingUserAddressesTable,
+  upsertDefaultUserAddress,
+  type UserAddressRow,
+} from "@/lib/userAddressDb";
+import { userIdForDbQuery } from "@/lib/userIdDb";
 
 const USER_FIELDS = "id, email, username, full_name, role";
 const USER_FIELDS_NO_ROLE = "id, email, username, full_name";
-const PROFILE_FIELDS = "user_id, username, full_name, avatar_url, phone, gender, dob";
-
+const PROFILE_FIELDS = "id, user_id, username, full_name, avatar_url, phone, gender, dob";
 function cleanString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -18,7 +24,7 @@ function isMissingProfilesTable(error: unknown): boolean {
 }
 
 type ResolvedUser = {
-  id: number;
+  id: string;
   email: string;
   username: string;
   full_name: string | null;
@@ -27,7 +33,7 @@ type ResolvedUser = {
 
 function normalizeResolvedUser(row: Record<string, unknown>): ResolvedUser {
   return {
-    id: Number(row.id),
+    id: row.id != null ? String(row.id) : "",
     email: String(row.email ?? ""),
     username: String(row.username ?? ""),
     full_name: typeof row.full_name === "string" ? row.full_name : null,
@@ -79,14 +85,23 @@ async function resolveSessionUser(
   supabase: ReturnType<typeof getSupabaseServerClient>,
   session: { sub: string; username: string; email: string }
 ): Promise<ResolvedUser | null> {
-  const sessionUserId = Number(session.sub);
-  const byIdResult = Number.isFinite(sessionUserId)
-    ? await selectUsersWithRoleFallback(supabase, (fields) =>
-        supabase.from("users").select(fields).eq("id", sessionUserId).maybeSingle()
-      )
-    : { rows: [], error: null };
-  if (byIdResult.rows.length > 0) {
-    return byIdResult.rows[0];
+  const sub = session.sub.trim();
+
+  const bySub = await selectUsersWithRoleFallback(supabase, (fields) =>
+    supabase.from("users").select(fields).eq("id", sub).maybeSingle()
+  );
+  if (bySub.rows.length > 0) {
+    return bySub.rows[0];
+  }
+
+  const sessionUserIdNum = Number(sub);
+  if (Number.isFinite(sessionUserIdNum) && /^[0-9]+$/.test(sub)) {
+    const byIdResult = await selectUsersWithRoleFallback(supabase, (fields) =>
+      supabase.from("users").select(fields).eq("id", sessionUserIdNum).maybeSingle()
+    );
+    if (byIdResult.rows.length > 0) {
+      return byIdResult.rows[0];
+    }
   }
 
   const byUsernameResult = await selectUsersWithRoleFallback(supabase, (fields) =>
@@ -103,7 +118,6 @@ async function resolveSessionUser(
     return byEmailResult.rows[0];
   }
 
-  // Legacy fallback: username may only exist in profiles table.
   const profileMatch = await supabase
     .from("profiles")
     .select("user_id")
@@ -118,8 +132,9 @@ async function resolveSessionUser(
       ? profileMatch.data[0]?.user_id
       : null;
   if (matchedUserId != null) {
+    const uid = userIdForDbQuery(matchedUserId as string | number);
     const byProfileResult = await selectUsersWithRoleFallback(supabase, (fields) =>
-      supabase.from("users").select(fields).eq("id", matchedUserId).maybeSingle()
+      supabase.from("users").select(fields).eq("id", uid).maybeSingle()
     );
     if (byProfileResult.rows.length > 0) {
       return byProfileResult.rows[0];
@@ -127,6 +142,25 @@ async function resolveSessionUser(
   }
 
   return null;
+}
+
+function buildUserResponse(
+  data: ResolvedUser,
+  profileData: Record<string, unknown> | null | undefined,
+  addresses: UserAddressRow[]
+) {
+  return {
+    user: {
+      ...data,
+      username: data.username,
+      full_name: data.full_name ?? null,
+      avatar_url: (profileData?.avatar_url as string | null | undefined) ?? null,
+      phone: (profileData?.phone as string | null | undefined) ?? null,
+      gender: (profileData?.gender as string | null | undefined) ?? null,
+      dob: (profileData?.dob as string | null | undefined) ?? null,
+      addresses,
+    },
+  };
 }
 
 export async function GET(request: Request) {
@@ -155,15 +189,19 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Profile not found." }, { status: 404 });
   }
 
+  const uid = userIdForDbQuery(data.id);
+
   const { data: profileData, error: profileError } = await supabase
     .from("profiles")
     .select(PROFILE_FIELDS)
-    .eq("user_id", data.id)
+    .eq("user_id", uid)
     .maybeSingle();
 
   if (profileError && !isMissingProfilesTable(profileError)) {
     return NextResponse.json({ error: profileError.message || "Could not load profile details." }, { status: 400 });
   }
+
+  const addresses = await fetchUserAddresses(supabase, data.id);
 
   if (profileError && isMissingProfilesTable(profileError)) {
     return NextResponse.json({
@@ -173,15 +211,15 @@ export async function GET(request: Request) {
         phone: null,
         gender: null,
         dob: null,
+        addresses,
       },
     });
   }
 
   if (!profileData) {
-    // Backfill profile identity fields for older users who predate profiles rows.
     const { error: backfillError } = await supabase.from("profiles").upsert(
       {
-        user_id: Number(data.id),
+        user_id: uid,
         username: data.username,
         full_name: data.full_name ?? null,
       },
@@ -192,17 +230,15 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({
-    user: {
-      ...data,
-      username: profileData?.username ?? data.username,
-      full_name: profileData?.full_name ?? data.full_name ?? null,
-      avatar_url: profileData?.avatar_url ?? null,
-      phone: profileData?.phone ?? null,
-      gender: profileData?.gender ?? null,
-      dob: profileData?.dob ?? null,
-    },
-  });
+  const { data: refreshedProfile } = await supabase
+    .from("profiles")
+    .select(PROFILE_FIELDS)
+    .eq("user_id", uid)
+    .maybeSingle();
+
+  return NextResponse.json(
+    buildUserResponse(data, refreshedProfile ?? profileData ?? undefined, addresses)
+  );
 }
 
 export async function PUT(request: Request) {
@@ -229,7 +265,8 @@ export async function PUT(request: Request) {
   if (!resolvedUser) {
     return NextResponse.json({ error: "Profile not found." }, { status: 404 });
   }
-  const userId = Number(resolvedUser.id);
+
+  const userIdKey = userIdForDbQuery(resolvedUser.id);
 
   let body: {
     full_name?: unknown;
@@ -237,6 +274,13 @@ export async function PUT(request: Request) {
     phone?: unknown;
     gender?: unknown;
     dob?: unknown;
+    address_label?: unknown;
+    address_line1?: unknown;
+    address_line2?: unknown;
+    address_city?: unknown;
+    address_state?: unknown;
+    address_postal_code?: unknown;
+    address_country?: unknown;
   };
   try {
     body = (await request.json()) as typeof body;
@@ -246,61 +290,92 @@ export async function PUT(request: Request) {
 
   const has = (key: keyof typeof body) => Object.prototype.hasOwnProperty.call(body, key);
   const userUpdatePayload: Record<string, unknown> = {};
-  const profileUpdatePayload: Record<string, unknown> = {};
+  const profileExtras: Record<string, unknown> = {};
 
   if (has("full_name")) {
     userUpdatePayload.full_name = cleanString(body.full_name);
-    profileUpdatePayload.full_name = cleanString(body.full_name);
   }
   if (has("avatar_url")) {
-    profileUpdatePayload.avatar_url = cleanString(body.avatar_url);
+    profileExtras.avatar_url = cleanString(body.avatar_url);
   }
   if (has("phone")) {
-    profileUpdatePayload.phone = cleanString(body.phone);
+    profileExtras.phone = cleanString(body.phone);
   }
   if (has("gender")) {
-    profileUpdatePayload.gender = cleanString(body.gender);
+    profileExtras.gender = cleanString(body.gender);
   }
   if (has("dob")) {
-    profileUpdatePayload.dob = typeof body.dob === "string" && body.dob.trim() ? body.dob.trim() : null;
+    profileExtras.dob = typeof body.dob === "string" && body.dob.trim() ? body.dob.trim() : null;
   }
 
-  if (Object.keys(userUpdatePayload).length === 0 && Object.keys(profileUpdatePayload).length === 0) {
-    return NextResponse.json({ error: "No fields to update." }, { status: 400 });
+  const mirrorFullName = has("full_name") ? cleanString(body.full_name) : resolvedUser.full_name;
+
+  const addrLine1 = cleanString(body.address_line1);
+  const addrCity = cleanString(body.address_city);
+  const addrState = cleanString(body.address_state);
+  const addrPostal = cleanString(body.address_postal_code);
+  const addrCountry = cleanString(body.address_country);
+  const addressComplete = Boolean(addrLine1 && addrCity && addrState && addrPostal && addrCountry);
+  if (!addressComplete) {
+    return NextResponse.json(
+      {
+        error:
+          "Shipping address is required: line 1, city, state or region, postal code, and country.",
+      },
+      { status: 400 }
+    );
   }
 
   if (Object.keys(userUpdatePayload).length > 0) {
-    const { error: userError } = await supabase.from("users").update(userUpdatePayload).eq("id", userId);
+    const { error: userError } = await supabase.from("users").update(userUpdatePayload).eq("id", userIdKey);
     if (userError) {
       return NextResponse.json({ error: userError.message || "Could not update user profile." }, { status: 400 });
     }
   }
 
-  if (Object.keys(profileUpdatePayload).length > 0) {
-    let profilesTableMissing = false;
-    const { error: profileError } = await supabase.from("profiles").upsert(
-      {
-        user_id: userId,
-        username: session.username,
-        ...profileUpdatePayload,
-      },
-      { onConflict: "user_id" }
-    );
-    if (profileError) {
-      if (isMissingProfilesTable(profileError)) {
-        // Allow updating core user fields even before profiles table migration is applied.
-        profilesTableMissing = true;
-      } else {
-        return NextResponse.json({ error: profileError.message || "Could not update profile details." }, { status: 400 });
-      }
-    }
-    if (profilesTableMissing) {
-      // No-op by design: continue and return users data with null profile fields.
+  let profilesTableMissing = false;
+  const { error: profileUpsertError } = await supabase.from("profiles").upsert(
+    {
+      user_id: userIdKey,
+      username: session.username,
+      full_name: mirrorFullName,
+      ...profileExtras,
+    },
+    { onConflict: "user_id" }
+  );
+  if (profileUpsertError) {
+    if (isMissingProfilesTable(profileUpsertError)) {
+      profilesTableMissing = true;
+    } else {
+      return NextResponse.json({ error: profileUpsertError.message || "Could not update profile details." }, { status: 400 });
     }
   }
 
+  if (profilesTableMissing) {
+    return NextResponse.json(
+      { error: "Profile storage is required to save your shipping address." },
+      { status: 503 }
+    );
+  }
+
+  const addrResult = await upsertDefaultUserAddress(supabase, resolvedUser.id, {
+    label: cleanString(body.address_label) ?? "Home",
+    line1: addrLine1!,
+    line2: cleanString(body.address_line2),
+    city: addrCity!,
+    state: addrState!,
+    postal_code: addrPostal!,
+    country: addrCountry!,
+  });
+  if (addrResult.error && !isMissingUserAddressesTable(addrResult.error)) {
+    return NextResponse.json(
+      { error: addrResult.error.message || "Could not save address." },
+      { status: 400 }
+    );
+  }
+
   const refreshedUser = await resolveSessionUser(supabase, {
-    sub: String(userId),
+    sub: session.sub,
     username: session.username,
     email: session.email,
   });
@@ -308,23 +383,27 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "Profile not found after update." }, { status: 404 });
   }
 
+  const uid = userIdForDbQuery(refreshedUser.id);
+
   const { data: profileData, error: profileReadError } = await supabase
     .from("profiles")
     .select(PROFILE_FIELDS)
-    .eq("user_id", userId)
+    .eq("user_id", uid)
     .maybeSingle();
 
   const missingProfiles = profileReadError && isMissingProfilesTable(profileReadError);
+  const addresses = await fetchUserAddresses(supabase, refreshedUser.id);
 
   return NextResponse.json({
     user: {
       ...refreshedUser,
-      username: profileData?.username ?? refreshedUser.username,
-      full_name: profileData?.full_name ?? refreshedUser.full_name ?? null,
+      username: refreshedUser.username,
+      full_name: refreshedUser.full_name ?? null,
       avatar_url: missingProfiles ? null : profileData?.avatar_url ?? null,
       phone: missingProfiles ? null : profileData?.phone ?? null,
       gender: missingProfiles ? null : profileData?.gender ?? null,
       dob: missingProfiles ? null : profileData?.dob ?? null,
+      addresses,
     },
   });
 }

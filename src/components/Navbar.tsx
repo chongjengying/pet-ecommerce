@@ -115,6 +115,12 @@ export default function Navbar() {
   }, [pathname]);
 
   useEffect(() => {
+    if (isAuthenticated) {
+      router.prefetch("/profile");
+    }
+  }, [isAuthenticated, router]);
+
+  useEffect(() => {
     const closeOnOutsideClick = (event: MouseEvent) => {
       if (!menuRef.current) return;
       if (!menuRef.current.contains(event.target as Node)) {

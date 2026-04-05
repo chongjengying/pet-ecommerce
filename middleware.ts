@@ -5,6 +5,18 @@ import {
   verifyAdminSessionToken,
 } from "@/lib/adminSession";
 
+/** Cookie must be non-legacy and include userId (issued after admin login + role check). */
+async function isValidAdminSessionToken(
+  token: string | undefined,
+  secret: string
+): Promise<boolean> {
+  if (!token || !secret) return false;
+  const session = await verifyAdminSessionToken(token, secret);
+  if (!session.ok) return false;
+  if ("legacy" in session && session.legacy) return false;
+  return "userId" in session && Boolean(session.userId);
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -21,6 +33,10 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  if (pathname.startsWith("/api/admin/auth/logout")) {
+    return NextResponse.next();
+  }
+
   if (isApiAdmin) {
     if (!secret) {
       return NextResponse.json(
@@ -29,17 +45,25 @@ export async function middleware(request: NextRequest) {
       );
     }
     const token = request.cookies.get(ADMIN_SESSION_COOKIE)?.value;
-    const session = token ? await verifyAdminSessionToken(token, secret) : { ok: false as const };
-    if (!token || !session.ok) {
+    const allowed = await isValidAdminSessionToken(token, secret);
+    if (!token || !allowed) {
       return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
     }
     return NextResponse.next();
   }
 
   if (pathname.startsWith("/admin/login")) {
-    const token = request.cookies.get(ADMIN_SESSION_COOKIE)?.value;
-    if (secret && token && (await verifyAdminSessionToken(token, secret))) {
-      return NextResponse.redirect(new URL("/admin", request.url));
+    const forbidden = request.nextUrl.searchParams.get("forbidden") === "1";
+    if (forbidden) {
+      const res = NextResponse.next();
+      res.cookies.set(ADMIN_SESSION_COOKIE, "", {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: 0,
+      });
+      return res;
     }
     return NextResponse.next();
   }
@@ -52,8 +76,8 @@ export async function middleware(request: NextRequest) {
   }
 
   const token = request.cookies.get(ADMIN_SESSION_COOKIE)?.value;
-  const session = token ? await verifyAdminSessionToken(token, secret) : { ok: false as const };
-  if (!token || !session.ok) {
+  const allowed = await isValidAdminSessionToken(token, secret);
+  if (!token || !allowed) {
     const url = request.nextUrl.clone();
     url.pathname = "/admin/login";
     url.searchParams.set("next", pathname);

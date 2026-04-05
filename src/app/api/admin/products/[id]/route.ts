@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { adminAccessDeniedResponse, verifyAdminAccess } from "@/lib/adminGate";
 import {
   coerceProductId,
   deleteProductImagesForProduct,
@@ -38,6 +39,9 @@ export async function PUT(
   request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
+  const gate = await verifyAdminAccess();
+  if (!gate.ok) return adminAccessDeniedResponse(gate);
+
   try {
     const { id: rawId } = await context.params;
     if (!rawId) {
@@ -123,6 +127,9 @@ export async function DELETE(
   _request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
+  const gate = await verifyAdminAccess();
+  if (!gate.ok) return adminAccessDeniedResponse(gate);
+
   try {
     const { id: rawId } = await context.params;
     if (!rawId) {

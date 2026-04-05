@@ -11,7 +11,6 @@ type AdminProfile = {
 };
 
 type MeResponse = {
-  legacySession?: boolean;
   username: string | null;
   email: string | null;
   id: string | null;
@@ -47,20 +46,15 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
 
         if (!res.ok) {
           setProfile(null);
+          if (res.status === 403) {
+            router.replace("/admin/login?forbidden=1");
+          } else if (res.status === 401 || res.status === 503) {
+            router.replace("/admin/login");
+          }
           return;
         }
 
         const data = (await res.json()) as MeResponse;
-        if (data.legacySession) {
-          setProfile({
-            username: "Admin",
-            email: null,
-            avatar_url: null,
-            role: "admin",
-          });
-          return;
-        }
-
         setProfile({
           username: data.username,
           email: data.email,
@@ -83,7 +77,7 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [router]);
 
   const logout = async () => {
     setLoading(true);

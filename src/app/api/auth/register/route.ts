@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 import { ADMIN_SESSION_COOKIE } from "@/lib/adminSession";
 import { createCustomerJwt, CUSTOMER_SESSION_COOKIE, CUSTOMER_SESSION_MAX_AGE_SEC } from "@/lib/customerJwt";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
+import { userIdForDbQuery } from "@/lib/userIdDb";
 
 type RegisterBody = {
   email?: string;
   password?: string;
+  confirmPassword?: string;
   username?: string;
   fullName?: string;
 };
@@ -38,21 +40,28 @@ export async function POST(request: Request) {
 
   const email = String(body.email ?? "").trim().toLowerCase();
   const password = String(body.password ?? "");
+  const confirmPassword = String(body.confirmPassword ?? "");
   const username = String(body.username ?? "").trim().toLowerCase();
   const fullName = String(body.fullName ?? "").trim();
 
-    if (!isValidEmail(email)) {
-      return NextResponse.json({ error: "Please provide a valid email." }, { status: 400 });
-    }
-    if (password.length < 6) {
-      return NextResponse.json({ error: "Password must be at least 6 characters." }, { status: 400 });
-    }
-    if (!isValidUsername(username)) {
-      return NextResponse.json(
-        { error: "Username must be 3-30 characters (letters, numbers, ., _, -)." },
-        { status: 400 }
-      );
-    }
+  if (!isValidEmail(email)) {
+    return NextResponse.json({ error: "Please provide a valid email." }, { status: 400 });
+  }
+  if (password.length < 6) {
+    return NextResponse.json({ error: "Password must be at least 6 characters." }, { status: 400 });
+  }
+  if (password !== confirmPassword) {
+    return NextResponse.json({ error: "Passwords do not match." }, { status: 400 });
+  }
+  if (fullName.length < 2) {
+    return NextResponse.json({ error: "Please enter your full name (at least 2 characters)." }, { status: 400 });
+  }
+  if (!isValidUsername(username)) {
+    return NextResponse.json(
+      { error: "Username must be 3-30 characters (letters, numbers, ., _, -)." },
+      { status: 400 }
+    );
+  }
 
   const { data: existing, error: existingError } = await supabase
     .from("users")
@@ -71,7 +80,7 @@ export async function POST(request: Request) {
     email,
     username,
     password,
-    full_name: fullName || null,
+    full_name: fullName,
     role: "customer",
   };
   const { data: createdWithRole, error: createWithRoleErr } = await supabase
@@ -90,7 +99,7 @@ export async function POST(request: Request) {
         email,
         username,
         password, // Requested: plain text password for now
-        full_name: fullName || null,
+        full_name: fullName,
       })
       .select("id, email, username, full_name")
       .single();
@@ -103,7 +112,7 @@ export async function POST(request: Request) {
   }
 
   const profilePayload = {
-    user_id: Number(created.id),
+    user_id: userIdForDbQuery(created.id),
     username: created.username,
     full_name: created.full_name ?? null,
     avatar_url: created.full_name ? `https://ui-avatars.com/api/?name=${encodeURIComponent(created.full_name)}` : null,

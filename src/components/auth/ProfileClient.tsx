@@ -2,7 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { PetLogoLoader } from "@/components/ui/PetLogoLoader";
+import {
+  clearProfileCache,
+  readProfileCache,
+  writeProfileCache,
+  type ProfileAddress,
+} from "@/lib/profileCache";
+import ProfileSkeleton from "@/components/auth/ProfileSkeleton";
 import { getAvatarInitials, UserAvatar } from "@/components/ui/UserAvatar";
 
 type ProfileUser = {
@@ -14,7 +20,13 @@ type ProfileUser = {
   phone?: string | null;
   gender?: string | null;
   dob?: string | null;
+  addresses?: ProfileAddress[];
 };
+
+function defaultShippingAddress(user: ProfileUser): ProfileAddress | null {
+  if (!user.addresses?.length) return null;
+  return user.addresses.find((a) => a.is_default) ?? user.addresses[0] ?? null;
+}
 
 /** Show username without a leading @ (handles legacy data that includes @). */
 function displayUsername(raw: string | undefined | null): string {
@@ -32,14 +44,22 @@ export default function ProfileClient() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [formKey, setFormKey] = useState(0);
 
   useEffect(() => {
     let active = true;
+    const token = typeof window !== "undefined" ? localStorage.getItem("customer_jwt_token") : null;
+    const cached = readProfileCache(token);
+    let hydratedFromCache = false;
+    if (cached) {
+      hydratedFromCache = true;
+      setUser(cached);
+      setLoading(false);
+    }
 
     const loadUser = async () => {
       try {
         setError(null);
-        const token = typeof window !== "undefined" ? localStorage.getItem("customer_jwt_token") : null;
         const res = await fetch("/api/profile", {
           method: "GET",
           headers: {
@@ -50,6 +70,8 @@ export default function ProfileClient() {
 
         if (!res.ok) {
           if (res.status === 401) {
+            clearProfileCache();
+            setUser(null);
             router.replace("/auth/login?next=/profile");
             return;
           }
@@ -64,7 +86,7 @@ export default function ProfileClient() {
           if (meRes.ok) {
             const mePayload = (await meRes.json().catch(() => ({}))) as { user?: Partial<ProfileUser> };
             if (mePayload.user?.email && mePayload.user?.username) {
-              setUser({
+              const partial: ProfileUser = {
                 id: String(mePayload.user.id ?? ""),
                 email: String(mePayload.user.email),
                 username: String(mePayload.user.username),
@@ -73,13 +95,17 @@ export default function ProfileClient() {
                 phone: null,
                 gender: null,
                 dob: null,
-              });
+              };
+              setUser(partial);
+              if (token2) writeProfileCache(token2, partial);
               setNotice("Profile details are not fully available yet. Please complete setup and save your profile.");
               return;
             }
           }
           const failure = (await res.json().catch(() => ({}))) as { error?: string };
-          setError(failure.error || "Could not load profile.");
+          if (!hydratedFromCache) {
+            setError(failure.error || "Could not load profile.");
+          }
           return;
         }
 
@@ -91,9 +117,12 @@ export default function ProfileClient() {
 
         setNotice(null);
         setUser(payload.user);
+        if (token) writeProfileCache(token, payload.user);
       } catch {
         if (!active) return;
-        setError("Could not load profile.");
+        if (!hydratedFromCache) {
+          setError("Could not load profile.");
+        }
       } finally {
         if (active) {
           setLoading(false);
@@ -109,6 +138,7 @@ export default function ProfileClient() {
 
   const onSignOut = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
+    clearProfileCache();
     localStorage.removeItem("customer_jwt_token");
     window.dispatchEvent(new Event("customer-auth-changed"));
     router.replace("/");
@@ -121,12 +151,32 @@ export default function ProfileClient() {
     setError(null);
     setSuccess(null);
 
-    const payload = {
+    const payload: Record<string, string> = {
       full_name: formData.get("full_name")?.toString() ?? "",
       phone: formData.get("phone")?.toString() ?? "",
       gender: formData.get("gender")?.toString() ?? "",
       dob: formData.get("dob")?.toString() ?? "",
+      address_label: formData.get("address_label")?.toString() ?? "",
+      address_line1: formData.get("address_line1")?.toString() ?? "",
+      address_line2: formData.get("address_line2")?.toString() ?? "",
+      address_city: formData.get("address_city")?.toString() ?? "",
+      address_state: formData.get("address_state")?.toString() ?? "",
+      address_postal_code: formData.get("address_postal_code")?.toString() ?? "",
+      address_country: formData.get("address_country")?.toString() ?? "",
     };
+
+    const need = (v: string) => v.trim().length > 0;
+    if (
+      !need(payload.address_line1) ||
+      !need(payload.address_city) ||
+      !need(payload.address_state) ||
+      !need(payload.address_postal_code) ||
+      !need(payload.address_country)
+    ) {
+      setError("Shipping address is required: line 1, city, state, postal code, and country.");
+      setSaving(false);
+      return;
+    }
 
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("customer_jwt_token") : null;
@@ -146,6 +196,8 @@ export default function ProfileClient() {
 
       setNotice(null);
       setUser(data.user);
+      if (token) writeProfileCache(token, data.user);
+      setFormKey((k) => k + 1);
       setSuccess("Changes saved.");
     } catch {
       setError("Could not save profile.");
@@ -154,12 +206,8 @@ export default function ProfileClient() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="overflow-hidden rounded-2xl border border-amber-200/60 bg-white py-14 shadow-sm sm:py-16">
-        <PetLogoLoader label="Loading your profile…" size="md" />
-      </div>
-    );
+  if (loading && !user) {
+    return <ProfileSkeleton />;
   }
 
   if (!user) {
@@ -173,6 +221,7 @@ export default function ProfileClient() {
   const userHandle = displayUsername(user.username);
   const greetingName = user.full_name?.trim() || userHandle;
   const initials = getAvatarInitials(user.full_name, user.username.replace(/^@+/, ""));
+  const ship = defaultShippingAddress(user);
 
   return (
     <div className="overflow-hidden rounded-2xl border border-amber-200/70 bg-white shadow-[0_12px_40px_rgba(44,36,32,0.06)]">
@@ -193,12 +242,13 @@ export default function ProfileClient() {
         </div>
         {isSetupFlow ? (
           <p className="mt-6 rounded-xl border border-amber-200/80 bg-white/90 px-4 py-3 text-sm leading-relaxed text-amber-950/90">
-            Complete your details below, then save to finish account setup.
+            Complete your details and a full shipping address below, then save. You need this address to check out.
           </p>
         ) : null}
       </div>
 
       <form
+        key={formKey}
         className="px-6 py-8 sm:px-10 sm:py-9"
         onSubmit={(event) => {
           event.preventDefault();
@@ -275,6 +325,95 @@ export default function ProfileClient() {
                 name="dob"
                 defaultValue={user.dob ?? ""}
                 className="w-full rounded-xl border border-amber-200/80 bg-white px-3.5 py-2.5 text-sm text-umber shadow-sm outline-none transition focus:border-sage/70 focus:ring-2 focus:ring-sage/20"
+              />
+            </label>
+          </div>
+        </section>
+
+        <div className="border-t border-amber-100/90" />
+
+        <section aria-labelledby="address-heading" className="pt-8">
+          <h2 id="address-heading" className="text-sm font-semibold text-umber">
+            Shipping address
+            <span className="ml-1 font-normal text-red-600">*</span>
+          </h2>
+          <p className="mt-1 text-xs text-umber/55">
+            Required for checkout. Line 2 and label are optional; all other fields must be filled.
+          </p>
+          <div className="mt-6 grid gap-5 sm:grid-cols-2">
+            <label className="block space-y-1.5 sm:col-span-1">
+              <span className="text-sm font-medium text-umber/90">Address label</span>
+              <input
+                name="address_label"
+                defaultValue={ship?.label ?? ""}
+                autoComplete="off"
+                className="w-full rounded-xl border border-amber-200/80 bg-white px-3.5 py-2.5 text-sm text-umber shadow-sm outline-none transition placeholder:text-umber/35 focus:border-sage/70 focus:ring-2 focus:ring-sage/20"
+                placeholder="Home"
+              />
+            </label>
+            <label className="block space-y-1.5 sm:col-span-2">
+              <span className="text-sm font-medium text-umber/90">Address line 1</span>
+              <input
+                name="address_line1"
+                defaultValue={ship?.line1 ?? ""}
+                autoComplete="address-line1"
+                required
+                className="w-full rounded-xl border border-amber-200/80 bg-white px-3.5 py-2.5 text-sm text-umber shadow-sm outline-none transition placeholder:text-umber/35 focus:border-sage/70 focus:ring-2 focus:ring-sage/20"
+                placeholder="Street, building, unit"
+              />
+            </label>
+            <label className="block space-y-1.5 sm:col-span-2">
+              <span className="text-sm font-medium text-umber/90">Address line 2</span>
+              <input
+                name="address_line2"
+                defaultValue={ship?.line2 ?? ""}
+                autoComplete="address-line2"
+                className="w-full rounded-xl border border-amber-200/80 bg-white px-3.5 py-2.5 text-sm text-umber shadow-sm outline-none transition placeholder:text-umber/35 focus:border-sage/70 focus:ring-2 focus:ring-sage/20"
+                placeholder="Apartment, floor (optional)"
+              />
+            </label>
+            <label className="block space-y-1.5 sm:col-span-1">
+              <span className="text-sm font-medium text-umber/90">City</span>
+              <input
+                name="address_city"
+                defaultValue={ship?.city ?? ""}
+                autoComplete="address-level2"
+                required
+                className="w-full rounded-xl border border-amber-200/80 bg-white px-3.5 py-2.5 text-sm text-umber shadow-sm outline-none transition placeholder:text-umber/35 focus:border-sage/70 focus:ring-2 focus:ring-sage/20"
+                placeholder="City"
+              />
+            </label>
+            <label className="block space-y-1.5 sm:col-span-1">
+              <span className="text-sm font-medium text-umber/90">State / region</span>
+              <input
+                name="address_state"
+                defaultValue={ship?.state ?? ""}
+                autoComplete="address-level1"
+                required
+                className="w-full rounded-xl border border-amber-200/80 bg-white px-3.5 py-2.5 text-sm text-umber shadow-sm outline-none transition placeholder:text-umber/35 focus:border-sage/70 focus:ring-2 focus:ring-sage/20"
+                placeholder="State"
+              />
+            </label>
+            <label className="block space-y-1.5 sm:col-span-1">
+              <span className="text-sm font-medium text-umber/90">Postal code</span>
+              <input
+                name="address_postal_code"
+                defaultValue={ship?.postal_code ?? ""}
+                autoComplete="postal-code"
+                required
+                className="w-full rounded-xl border border-amber-200/80 bg-white px-3.5 py-2.5 text-sm text-umber shadow-sm outline-none transition placeholder:text-umber/35 focus:border-sage/70 focus:ring-2 focus:ring-sage/20"
+                placeholder="Postcode"
+              />
+            </label>
+            <label className="block space-y-1.5 sm:col-span-1">
+              <span className="text-sm font-medium text-umber/90">Country</span>
+              <input
+                name="address_country"
+                defaultValue={ship?.country ?? "MY"}
+                autoComplete="country-name"
+                required
+                className="w-full rounded-xl border border-amber-200/80 bg-white px-3.5 py-2.5 text-sm text-umber shadow-sm outline-none transition placeholder:text-umber/35 focus:border-sage/70 focus:ring-2 focus:ring-sage/20"
+                placeholder="MY"
               />
             </label>
           </div>

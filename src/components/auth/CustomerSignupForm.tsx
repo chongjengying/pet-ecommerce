@@ -7,9 +7,10 @@ import { useState } from "react";
 export default function CustomerSignupForm() {
   const router = useRouter();
   const [username, setUsername] = useState("");
+  const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [fullName, setFullName] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -21,9 +22,21 @@ export default function CustomerSignupForm() {
     setLoading(true);
 
     const normalizedEmail = email.trim().toLowerCase();
-    const trimmedUsername = username.trim();
+    const trimmedUsername = username.trim().toLowerCase();
+    const trimmedFullName = fullName.trim();
+
+    if (!trimmedFullName || trimmedFullName.length < 2) {
+      setError("Please enter your full name.");
+      setLoading(false);
+      return;
+    }
     if (!normalizedEmail || !trimmedUsername || password.length < 6) {
-      setError("Use a valid email and a password with at least 6 characters.");
+      setError("Use a valid email, username, and a password with at least 6 characters.");
+      setLoading(false);
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError("Passwords do not match. Please check and try again.");
       setLoading(false);
       return;
     }
@@ -35,7 +48,8 @@ export default function CustomerSignupForm() {
         username: trimmedUsername,
         email: normalizedEmail,
         password,
-        fullName: fullName.trim(),
+        confirmPassword,
+        fullName: trimmedFullName,
       }),
     });
     const payload = (await res.json().catch(() => ({}))) as { error?: string; token?: string };
@@ -49,7 +63,7 @@ export default function CustomerSignupForm() {
       localStorage.setItem("customer_jwt_token", payload.token);
       window.dispatchEvent(new Event("customer-auth-changed"));
     }
-    setMessage("Account created. Continue by completing your profile details.");
+    setMessage("Account created. Add your shipping address on your profile next.");
     setLoading(false);
     router.replace("/profile?setup=1");
     router.refresh();
@@ -60,7 +74,7 @@ export default function CustomerSignupForm() {
       <div className="mb-6">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sage">Pawluxe Customer</p>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight text-umber">Create account</h1>
-        <p className="mt-2 text-sm text-umber/70">Save addresses, view order history, and checkout quickly.</p>
+        <p className="mt-2 text-sm text-umber/70">View order history and check out after you add a shipping address on your profile.</p>
       </div>
 
       <form onSubmit={onSubmit} className="space-y-4">
@@ -72,19 +86,26 @@ export default function CustomerSignupForm() {
             value={username}
             onChange={(event) => setUsername(event.target.value)}
             placeholder="janedoe"
+            minLength={3}
+            maxLength={30}
+            pattern="[a-zA-Z0-9._-]{3,30}"
+            title="3–30 characters: letters, numbers, . _ -"
             className="w-full rounded-2xl border border-amber-200/80 bg-cream px-3.5 py-3 text-sm text-umber outline-none transition focus:border-sage focus:bg-white"
             required
           />
         </label>
+
         <label className="block space-y-1.5">
-          <span className="text-sm font-medium text-umber/85">Full name (optional)</span>
+          <span className="text-sm font-medium text-umber/85">Full name</span>
           <input
             type="text"
             autoComplete="name"
             value={fullName}
             onChange={(event) => setFullName(event.target.value)}
             placeholder="Jane Pawson"
+            minLength={2}
             className="w-full rounded-2xl border border-amber-200/80 bg-cream px-3.5 py-3 text-sm text-umber outline-none transition focus:border-sage focus:bg-white"
+            required
           />
         </label>
 
@@ -109,6 +130,21 @@ export default function CustomerSignupForm() {
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             placeholder="At least 6 characters"
+            minLength={6}
+            className="w-full rounded-2xl border border-amber-200/80 bg-cream px-3.5 py-3 text-sm text-umber outline-none transition focus:border-sage focus:bg-white"
+            required
+          />
+        </label>
+
+        <label className="block space-y-1.5">
+          <span className="text-sm font-medium text-umber/85">Confirm password</span>
+          <input
+            type="password"
+            autoComplete="new-password"
+            value={confirmPassword}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+            placeholder="Re-enter your password"
+            minLength={6}
             className="w-full rounded-2xl border border-amber-200/80 bg-cream px-3.5 py-3 text-sm text-umber outline-none transition focus:border-sage focus:bg-white"
             required
           />

@@ -1,4 +1,5 @@
 -- Profile details table for customer accounts.
+-- NOTE: For new installs prefer `supabase-schema-users-profiles-uuid.sql` (UUID ids, `profiles.user_id` → `users.id`, `user_addresses`).
 -- Keep account identity in `users`, and personal details in `profiles`.
 create table if not exists public.profiles (
   id bigserial primary key,
