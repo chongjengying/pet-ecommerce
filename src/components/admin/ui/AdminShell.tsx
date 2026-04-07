@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AdminLogoutButton from "@/components/admin/AdminLogoutButton";
 import { useAdminAuth } from "@/components/admin/AdminAuthProvider";
 
@@ -101,6 +101,30 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     .map((part) => part[0]?.toUpperCase() ?? "")
     .join("") || "A";
 
+  useEffect(() => {
+    // Auto-close mobile drawer after route navigation.
+    setSidebarOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!sidebarOpen) return;
+
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSidebarOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [sidebarOpen]);
+
   return (
     <div className="min-h-screen bg-zinc-100 bg-[radial-gradient(ellipse_100%_60%_at_50%_-20%,rgba(16,185,129,0.07),transparent)]">
       <div className="hidden md:fixed md:inset-y-0 md:left-0 md:block md:w-64">
@@ -114,13 +138,20 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           <div className="mx-auto flex h-[3.75rem] max-w-[1600px] items-center gap-3 md:h-16">
             <button
               type="button"
-              onClick={() => setSidebarOpen(true)}
+              onClick={() => setSidebarOpen((open) => !open)}
               className="rounded-xl border border-zinc-200/80 bg-white p-2 text-zinc-600 shadow-sm md:hidden"
-              aria-label="Open menu"
+              aria-label={sidebarOpen ? "Close menu" : "Open menu"}
+              aria-expanded={sidebarOpen}
             >
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
+              {sidebarOpen ? (
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              ) : (
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              )}
             </button>
             <div className="min-w-0 flex-1">
               <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-zinc-400">Console</p>
@@ -173,7 +204,17 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             className="h-full w-full bg-black/50 backdrop-blur-[2px]"
             aria-label="Close menu"
           />
-          <div className="h-full w-[min(20rem,85vw)] shadow-2xl shadow-black/40">
+          <div className="relative h-full w-[min(20rem,85vw)] shadow-2xl shadow-black/40">
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(false)}
+              className="absolute right-3 top-3 z-10 rounded-lg border border-white/10 bg-black/25 p-1.5 text-white"
+              aria-label="Close navigation"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
             <Sidebar close={() => setSidebarOpen(false)} />
           </div>
         </div>

@@ -191,17 +191,18 @@ export async function GET(request: Request) {
 
   const uid = userIdForDbQuery(data.id);
 
-  const { data: profileData, error: profileError } = await supabase
-    .from("profiles")
-    .select(PROFILE_FIELDS)
-    .eq("user_id", uid)
-    .maybeSingle();
+  const [{ data: profileData, error: profileError }, addresses] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select(PROFILE_FIELDS)
+      .eq("user_id", uid)
+      .maybeSingle(),
+    fetchUserAddresses(supabase, data.id),
+  ]);
 
   if (profileError && !isMissingProfilesTable(profileError)) {
     return NextResponse.json({ error: profileError.message || "Could not load profile details." }, { status: 400 });
   }
-
-  const addresses = await fetchUserAddresses(supabase, data.id);
 
   if (profileError && isMissingProfilesTable(profileError)) {
     return NextResponse.json({
@@ -217,28 +218,26 @@ export async function GET(request: Request) {
   }
 
   if (!profileData) {
-    const { error: backfillError } = await supabase.from("profiles").upsert(
-      {
-        user_id: uid,
-        username: data.username,
-        full_name: data.full_name ?? null,
-      },
-      { onConflict: "user_id" }
-    );
+    const { data: backfilledProfile, error: backfillError } = await supabase
+      .from("profiles")
+      .upsert(
+        {
+          user_id: uid,
+          username: data.username,
+          full_name: data.full_name ?? null,
+        },
+        { onConflict: "user_id" }
+      )
+      .select(PROFILE_FIELDS)
+      .maybeSingle();
     if (backfillError && !isMissingProfilesTable(backfillError)) {
       return NextResponse.json({ error: backfillError.message || "Could not load profile details." }, { status: 400 });
     }
+    return NextResponse.json(
+      buildUserResponse(data, backfilledProfile ?? profileData ?? undefined, addresses)
+    );
   }
-
-  const { data: refreshedProfile } = await supabase
-    .from("profiles")
-    .select(PROFILE_FIELDS)
-    .eq("user_id", uid)
-    .maybeSingle();
-
-  return NextResponse.json(
-    buildUserResponse(data, refreshedProfile ?? profileData ?? undefined, addresses)
-  );
+  return NextResponse.json(buildUserResponse(data, profileData ?? undefined, addresses));
 }
 
 export async function PUT(request: Request) {
@@ -308,8 +307,6 @@ export async function PUT(request: Request) {
     profileExtras.dob = typeof body.dob === "string" && body.dob.trim() ? body.dob.trim() : null;
   }
 
-  const mirrorFullName = has("full_name") ? cleanString(body.full_name) : resolvedUser.full_name;
-
   const addrLine1 = cleanString(body.address_line1);
   const addrCity = cleanString(body.address_city);
   const addrState = cleanString(body.address_state);
@@ -333,22 +330,40 @@ export async function PUT(request: Request) {
     }
   }
 
-  let profilesTableMissing = false;
-  const { error: profileUpsertError } = await supabase.from("profiles").upsert(
-    {
-      user_id: userIdKey,
-      username: session.username,
-      full_name: mirrorFullName,
-      ...profileExtras,
-    },
-    { onConflict: "user_id" }
+  const canonicalUserResult = await selectUsersWithRoleFallback(supabase, (fields) =>
+    supabase.from("users").select(fields).eq("id", userIdKey).maybeSingle()
   );
+  if (canonicalUserResult.error || canonicalUserResult.rows.length === 0) {
+    return NextResponse.json(
+      { error: canonicalUserResult.error || "Could not load updated user profile." },
+      { status: 400 }
+    );
+  }
+  const canonicalUser = canonicalUserResult.rows[0];
+
+  let profilesTableMissing = false;
+  let profileData: Record<string, unknown> | null = null;
+  const { data: upsertedProfile, error: profileUpsertError } = await supabase
+    .from("profiles")
+    .upsert(
+      {
+        user_id: userIdKey,
+        username: canonicalUser.username,
+        full_name: canonicalUser.full_name,
+        ...profileExtras,
+      },
+      { onConflict: "user_id" }
+    )
+    .select(PROFILE_FIELDS)
+    .maybeSingle();
   if (profileUpsertError) {
     if (isMissingProfilesTable(profileUpsertError)) {
       profilesTableMissing = true;
     } else {
       return NextResponse.json({ error: profileUpsertError.message || "Could not update profile details." }, { status: 400 });
     }
+  } else if (upsertedProfile) {
+    profileData = upsertedProfile as Record<string, unknown>;
   }
 
   if (profilesTableMissing) {
@@ -374,24 +389,23 @@ export async function PUT(request: Request) {
     );
   }
 
-  const refreshedUser = await resolveSessionUser(supabase, {
-    sub: session.sub,
-    username: session.username,
-    email: session.email,
-  });
-  if (!refreshedUser) {
-    return NextResponse.json({ error: "Profile not found after update." }, { status: 404 });
+  const refreshedUser: ResolvedUser = canonicalUser;
+
+  if (!profilesTableMissing && !profileData) {
+    const uid = userIdForDbQuery(refreshedUser.id);
+    const { data: profileReadData, error: profileReadError } = await supabase
+      .from("profiles")
+      .select(PROFILE_FIELDS)
+      .eq("user_id", uid)
+      .maybeSingle();
+    if (profileReadError && !isMissingProfilesTable(profileReadError)) {
+      return NextResponse.json({ error: profileReadError.message || "Could not load profile details." }, { status: 400 });
+    }
+    if (profileReadData) {
+      profileData = profileReadData as Record<string, unknown>;
+    }
   }
 
-  const uid = userIdForDbQuery(refreshedUser.id);
-
-  const { data: profileData, error: profileReadError } = await supabase
-    .from("profiles")
-    .select(PROFILE_FIELDS)
-    .eq("user_id", uid)
-    .maybeSingle();
-
-  const missingProfiles = profileReadError && isMissingProfilesTable(profileReadError);
   const addresses = await fetchUserAddresses(supabase, refreshedUser.id);
 
   return NextResponse.json({
@@ -399,10 +413,10 @@ export async function PUT(request: Request) {
       ...refreshedUser,
       username: refreshedUser.username,
       full_name: refreshedUser.full_name ?? null,
-      avatar_url: missingProfiles ? null : profileData?.avatar_url ?? null,
-      phone: missingProfiles ? null : profileData?.phone ?? null,
-      gender: missingProfiles ? null : profileData?.gender ?? null,
-      dob: missingProfiles ? null : profileData?.dob ?? null,
+      avatar_url: profilesTableMissing ? null : (profileData?.avatar_url as string | null | undefined) ?? null,
+      phone: profilesTableMissing ? null : (profileData?.phone as string | null | undefined) ?? null,
+      gender: profilesTableMissing ? null : (profileData?.gender as string | null | undefined) ?? null,
+      dob: profilesTableMissing ? null : (profileData?.dob as string | null | undefined) ?? null,
       addresses,
     },
   });

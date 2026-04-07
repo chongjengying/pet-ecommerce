@@ -28,6 +28,17 @@ function defaultShippingAddress(user: ProfileUser): ProfileAddress | null {
   return user.addresses.find((a) => a.is_default) ?? user.addresses[0] ?? null;
 }
 
+function normalizeGender(value: string | null | undefined): "" | "male" | "female" {
+  return value === "male" || value === "female" ? value : "";
+}
+
+function normalizeAddressLabel(value: string | null | undefined): "Home" | "Work" | "Office" {
+  const v = (value ?? "").trim().toLowerCase();
+  if (v === "work") return "Work";
+  if (v === "office") return "Office";
+  return "Home";
+}
+
 /** Show username without a leading @ (handles legacy data that includes @). */
 function displayUsername(raw: string | undefined | null): string {
   if (raw == null || String(raw).trim() === "") return "—";
@@ -222,6 +233,8 @@ export default function ProfileClient() {
   const greetingName = user.full_name?.trim() || userHandle;
   const initials = getAvatarInitials(user.full_name, user.username.replace(/^@+/, ""));
   const ship = defaultShippingAddress(user);
+  const selectedGender = normalizeGender(user.gender);
+  const selectedAddressLabel = normalizeAddressLabel(ship?.label);
 
   return (
     <div className="overflow-hidden rounded-2xl border border-amber-200/70 bg-white shadow-[0_12px_40px_rgba(44,36,32,0.06)]">
@@ -308,14 +321,12 @@ export default function ProfileClient() {
               <span className="text-sm font-medium text-umber/90">Gender</span>
               <select
                 name="gender"
-                defaultValue={user.gender ?? ""}
+                defaultValue={selectedGender}
                 className="w-full rounded-xl border border-amber-200/80 bg-white px-3.5 py-2.5 text-sm text-umber shadow-sm outline-none transition focus:border-sage/70 focus:ring-2 focus:ring-sage/20"
               >
                 <option value="">Prefer not to say</option>
-                <option value="female">Female</option>
                 <option value="male">Male</option>
-                <option value="non-binary">Non-binary</option>
-                <option value="other">Other</option>
+                <option value="female">Female</option>
               </select>
             </label>
             <label className="block space-y-1.5 sm:col-span-1 sm:max-w-xs">
@@ -343,13 +354,15 @@ export default function ProfileClient() {
           <div className="mt-6 grid gap-5 sm:grid-cols-2">
             <label className="block space-y-1.5 sm:col-span-1">
               <span className="text-sm font-medium text-umber/90">Address label</span>
-              <input
+              <select
                 name="address_label"
-                defaultValue={ship?.label ?? ""}
-                autoComplete="off"
-                className="w-full rounded-xl border border-amber-200/80 bg-white px-3.5 py-2.5 text-sm text-umber shadow-sm outline-none transition placeholder:text-umber/35 focus:border-sage/70 focus:ring-2 focus:ring-sage/20"
-                placeholder="Home"
-              />
+                defaultValue={selectedAddressLabel}
+                className="w-full rounded-xl border border-amber-200/80 bg-white px-3.5 py-2.5 text-sm text-umber shadow-sm outline-none transition focus:border-sage/70 focus:ring-2 focus:ring-sage/20"
+              >
+                <option value="Home">Home</option>
+                <option value="Work">Work</option>
+                <option value="Office">Office</option>
+              </select>
             </label>
             <label className="block space-y-1.5 sm:col-span-2">
               <span className="text-sm font-medium text-umber/90">Address line 1</span>

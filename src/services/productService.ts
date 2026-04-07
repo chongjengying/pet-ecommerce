@@ -385,16 +385,47 @@ export async function getProductById(productId: string | number): Promise<Produc
 
   if (error || !data) throw error ?? new Error("Product not found")
 
-  const [withImage] = await attachProductImages([data as ProductRow])
-  const [withCategory] = await attachCategoryNames([withImage as ProductRow])
-  const normalized = normalizeProduct(withCategory as ProductRow)
+  const [withCategoryRows, galleryUrls] = await Promise.all([
+    attachCategoryNames([data as ProductRow]),
+    fetchProductGalleryUrls(id),
+  ])
+
+  const withCategory = withCategoryRows[0] as ProductRow
+  const normalized = normalizeProduct(withCategory)
   if (!normalized) throw new Error("Product shape is invalid")
 
-  const galleryUrls = await fetchProductGalleryUrls(id)
   const mainFallback = resolveProductImageUrl(normalized)
-  const gallery_images = galleryUrls.length > 0 ? galleryUrls : [mainFallback]
+  const fallbackGallery = mainFallback ? [mainFallback] : []
+  const gallery_images = galleryUrls.length > 0 ? galleryUrls : fallbackGallery
 
-  return { ...normalized, gallery_images }
+  const primaryImage = gallery_images[0] || mainFallback
+  return {
+    ...normalized,
+    image: normalized.image ?? primaryImage,
+    image_url: normalized.image_url ?? primaryImage,
+    gallery_images,
+  }
+}
+
+export async function getRelatedProducts(
+  productId: string | number,
+  limit = 4
+): Promise<Product[]> {
+  const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 4
+  const seedCount = Math.max(8, safeLimit * 3)
+
+  const { data } = await supabase
+    .from("products")
+    .select("*")
+    .neq("id", productId as string | number)
+    .limit(seedCount)
+
+  const withImages = await attachProductImages((data ?? []) as ProductRow[])
+  const withCategories = await attachCategoryNames(withImages as ProductRow[])
+  return withCategories
+    .map((row) => normalizeProduct(row as ProductRow))
+    .filter((p): p is Product => p != null)
+    .slice(0, safeLimit)
 }
 
 /** Decrement product stock by quantity. Throws if insufficient stock. */
