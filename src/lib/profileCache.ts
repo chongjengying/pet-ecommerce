@@ -3,8 +3,9 @@ const STORAGE_KEY = "pawluxe_profile_cache_v1";
 export type ProfileAddress = {
   id: string;
   label: string;
-  line1: string;
-  line2: string | null;
+  recipient_name?: string | null;
+  address_line1: string;
+  address_line2: string | null;
   city: string;
   state: string | null;
   postal_code: string | null;
@@ -30,7 +31,8 @@ type Stored = {
 };
 
 function tokenPrefix(token: string): string {
-  return token.slice(0, 36);
+  const trimmed = token.trim();
+  return `${trimmed.length}:${trimmed.slice(0, 16)}:${trimmed.slice(-24)}`;
 }
 
 export function readProfileCache(token: string | null): CachedProfileUser | null {

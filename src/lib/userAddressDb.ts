@@ -18,8 +18,9 @@ export const USER_ADDRESS_SELECT_FIELDS = "*";
 export type UserAddressRow = {
   id: string;
   label: string;
-  line1: string;
-  line2: string | null;
+  recipient_name?: string | null;
+  address_line1: string;
+  address_line2: string | null;
   city: string;
   state: string | null;
   postal_code: string | null;
@@ -38,7 +39,7 @@ const nonEmpty = (s: string | null | undefined): boolean => typeof s === "string
 export function isCompleteShippingAddress(row: UserAddressRow | null | undefined): boolean {
   if (!row) return false;
   return (
-    nonEmpty(row.line1) &&
+    nonEmpty(row.address_line1) &&
     nonEmpty(row.city) &&
     nonEmpty(row.state) &&
     nonEmpty(row.postal_code) &&
@@ -78,17 +79,24 @@ function isMissingColumn(error: unknown, column: string): boolean {
 }
 
 export function mapUserAddressRow(r: Record<string, unknown>): UserAddressRow {
-  const line1 =
-    typeof r.line1 === "string"
-      ? r.line1
-      : typeof r.address_line1 === "string"
-        ? r.address_line1
+  const addressLine1 =
+    typeof r.address_line1 === "string"
+      ? r.address_line1
+      : typeof r.line1 === "string"
+        ? r.line1
         : "";
+  const addressLine2 =
+    typeof r.address_line2 === "string"
+      ? r.address_line2
+      : typeof r.line2 === "string"
+        ? r.line2
+        : null;
   return {
     id: String(r.id ?? ""),
     label: typeof r.label === "string" ? r.label : "Home",
-    line1,
-    line2: typeof r.line2 === "string" ? r.line2 : null,
+    recipient_name: typeof r.recipient_name === "string" ? r.recipient_name : null,
+    address_line1: addressLine1,
+    address_line2: addressLine2,
     city: typeof r.city === "string" ? r.city : "",
     state: typeof r.state === "string" ? r.state : null,
     postal_code: typeof r.postal_code === "string" ? r.postal_code : null,
@@ -153,8 +161,9 @@ export async function fetchUserAddresses(supabase: Supabase, userId: string): Pr
 
 export type DefaultUserAddressPayload = {
   label: string;
-  line1: string;
-  line2: string | null;
+  recipient_name?: string | null;
+  address_line1: string;
+  address_line2: string | null;
   city: string;
   state: string | null;
   postal_code: string | null;
@@ -249,7 +258,6 @@ async function upsertDefaultByUserIdOnly(
 
     const u2 = await updateByIdWithMissingColumnFallback(supabase, id, {
       ...payload,
-      address_line1: payload.line1,
       is_default: true,
     });
     return { error: u2 };
@@ -258,7 +266,6 @@ async function upsertDefaultByUserIdOnly(
   const ins = await insertWithMissingColumnFallback(supabase, {
     user_id: uid,
     ...payload,
-    address_line1: payload.line1,
     is_default: true,
   });
   return { error: ins };
@@ -332,7 +339,6 @@ export async function upsertDefaultUserAddress(
 
     const u2 = await updateByIdWithMissingColumnFallback(supabase, id, {
       ...payload,
-      address_line1: payload.line1,
       is_default: true,
     });
     return { error: u2 };
@@ -342,7 +348,6 @@ export async function upsertDefaultUserAddress(
     user_id: uid,
     profile_id: profileId,
     ...payload,
-    address_line1: payload.line1,
     is_default: true,
   };
   const ins = await insertWithMissingColumnFallback(supabase, insertRow);

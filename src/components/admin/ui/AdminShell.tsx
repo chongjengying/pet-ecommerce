@@ -102,11 +102,6 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     .join("") || "A";
 
   useEffect(() => {
-    // Auto-close mobile drawer after route navigation.
-    setSidebarOpen(false);
-  }, [pathname]);
-
-  useEffect(() => {
     if (!sidebarOpen) return;
 
     const prev = document.body.style.overflow;
@@ -126,14 +121,14 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   }, [sidebarOpen]);
 
   return (
-    <div className="min-h-screen bg-zinc-100 bg-[radial-gradient(ellipse_100%_60%_at_50%_-20%,rgba(16,185,129,0.07),transparent)]">
-      <div className="hidden md:fixed md:inset-y-0 md:left-0 md:block md:w-64">
+    <div className="min-h-screen bg-zinc-100 bg-[radial-gradient(ellipse_100%_60%_at_50%_-20%,rgba(16,185,129,0.07),transparent)] md:grid md:grid-cols-[16rem_minmax(0,1fr)]">
+      <div className="hidden md:sticky md:top-0 md:block md:h-screen">
         <div className="h-full border-r border-white/[0.06] shadow-[4px_0_24px_-4px_rgba(0,0,0,0.25)]">
           <Sidebar />
         </div>
       </div>
 
-      <div className="md:pl-64">
+      <div className="min-w-0">
         <header className="sticky top-0 z-40 border-b border-zinc-200/80 bg-white/80 px-4 backdrop-blur-xl md:px-6">
           <div className="mx-auto flex h-[3.75rem] max-w-[1600px] items-center gap-3 md:h-16">
             <button
@@ -197,14 +192,14 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
       </div>
 
       {sidebarOpen ? (
-        <div className="fixed inset-0 z-50 flex md:hidden">
+        <div className="fixed inset-0 z-50 md:hidden">
           <button
             type="button"
             onClick={() => setSidebarOpen(false)}
-            className="h-full w-full bg-black/50 backdrop-blur-[2px]"
+            className="absolute inset-0 bg-black/50 backdrop-blur-[2px]"
             aria-label="Close menu"
           />
-          <div className="relative h-full w-[min(20rem,85vw)] shadow-2xl shadow-black/40">
+          <div className="absolute left-0 top-0 h-full w-[min(20rem,85vw)] shadow-2xl shadow-black/40">
             <button
               type="button"
               onClick={() => setSidebarOpen(false)}

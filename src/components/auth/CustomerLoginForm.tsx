@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
+import { clearProfileCache } from "@/lib/profileCache";
 
 export default function CustomerLoginForm() {
   const router = useRouter();
@@ -40,6 +41,7 @@ export default function CustomerLoginForm() {
       }
 
       if (payload.token) {
+        clearProfileCache();
         localStorage.setItem("customer_jwt_token", payload.token);
         window.dispatchEvent(new Event("customer-auth-changed"));
       }

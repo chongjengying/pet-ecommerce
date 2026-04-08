@@ -1,166 +1,130 @@
 import { NextResponse } from "next/server";
 import { getCustomerFromRequest } from "@/lib/customerJwt";
+import {
+  cleanString,
+  isMissingProfilesTable,
+  loadCustomerProfileForSession,
+  resolveSessionUser,
+  selectUsersWithRoleFallback,
+  type ResolvedUser,
+} from "@/lib/customerProfile";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
 import {
+  addressesTable,
   fetchUserAddresses,
   isMissingUserAddressesTable,
   upsertDefaultUserAddress,
-  type UserAddressRow,
 } from "@/lib/userAddressDb";
 import { userIdForDbQuery } from "@/lib/userIdDb";
-
-const USER_FIELDS = "id, email, username, full_name, role";
-const USER_FIELDS_NO_ROLE = "id, email, username, full_name";
 const PROFILE_FIELDS = "id, user_id, username, full_name, avatar_url, phone, gender, dob";
-function cleanString(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length === 0 ? null : trimmed;
-}
 
-function isMissingProfilesTable(error: unknown): boolean {
-  const message = String((error as { message?: string })?.message ?? "").toLowerCase();
-  return message.includes("profiles") && (message.includes("does not exist") || message.includes("could not find"));
-}
-
-type ResolvedUser = {
-  id: string;
-  email: string;
-  username: string;
-  full_name: string | null;
-  role: string | null;
+type ProfileRequestBody = {
+  full_name?: unknown;
+  avatar_url?: unknown;
+  phone?: unknown;
+  gender?: unknown;
+  dob?: unknown;
+  address_label?: unknown;
+  address_recipient_name?: unknown;
+  address_line1?: unknown;
+  address_line2?: unknown;
+  address_city?: unknown;
+  address_state?: unknown;
+  address_postal_code?: unknown;
+  address_country?: unknown;
+  action?: unknown;
+  addressId?: unknown;
+  address?: Record<string, unknown> | null;
+  set_default?: unknown;
 };
 
-function normalizeResolvedUser(row: Record<string, unknown>): ResolvedUser {
-  return {
-    id: row.id != null ? String(row.id) : "",
-    email: String(row.email ?? ""),
-    username: String(row.username ?? ""),
-    full_name: typeof row.full_name === "string" ? row.full_name : null,
-    role: typeof row.role === "string" ? row.role : "customer",
-  };
+function missingColumnName(error: unknown): string | null {
+  const message = String((error as { message?: string })?.message ?? "");
+  const match =
+    message.match(/column ["']?([a-zA-Z0-9_]+)["']?/i) ??
+    message.match(/could not find the ['"]?([a-zA-Z0-9_]+)['"]? column/i);
+  return match?.[1] ?? null;
 }
 
-function isMissingRoleColumnError(error: unknown): boolean {
-  const message = String((error as { message?: string })?.message ?? "").toLowerCase();
-  return message.includes("role") && message.includes("column");
-}
-
-type UsersQueryResult = { data: unknown; error: { message?: string } | null };
-
-async function selectUsersWithRoleFallback(
+async function insertAddressWithSchemaFallback(
   supabase: ReturnType<typeof getSupabaseServerClient>,
-  fetcher: (fields: string) => PromiseLike<UsersQueryResult>
-): Promise<{ rows: ResolvedUser[]; error: string | null }> {
-  const withRole = await fetcher(USER_FIELDS);
-  if (!withRole.error) {
-    return {
-      rows: Array.isArray(withRole.data)
-        ? (withRole.data as Record<string, unknown>[]).map(normalizeResolvedUser)
-        : withRole.data
-          ? [normalizeResolvedUser(withRole.data as Record<string, unknown>)]
-          : [],
-      error: null,
-    };
+  payload: Record<string, unknown>
+) {
+  const mutablePayload = { ...payload };
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const result = await supabase.from(addressesTable()).insert(mutablePayload);
+    if (!result.error) {
+      return result;
+    }
+    const missing = missingColumnName(result.error);
+    if (!missing || !(missing in mutablePayload)) {
+      return result;
+    }
+    delete mutablePayload[missing];
   }
-  if (!isMissingRoleColumnError(withRole.error)) {
-    return { rows: [], error: withRole.error.message || "Could not load user profile." };
-  }
-
-  const withoutRole = await fetcher(USER_FIELDS_NO_ROLE);
-  if (withoutRole.error) {
-    return { rows: [], error: withoutRole.error.message || "Could not load user profile." };
-  }
-  return {
-    rows: Array.isArray(withoutRole.data)
-      ? (withoutRole.data as Record<string, unknown>[]).map(normalizeResolvedUser)
-      : withoutRole.data
-        ? [normalizeResolvedUser(withoutRole.data as Record<string, unknown>)]
-        : [],
-    error: null,
-  };
+  return { error: { message: "Could not save address because of address schema mismatch." } };
 }
 
-async function resolveSessionUser(
+async function updateAddressWithSchemaFallback(
+  supabase: ReturnType<typeof getSupabaseServerClient>,
+  addressId: string,
+  userIdKey: string | number,
+  payload: Record<string, unknown>
+) {
+  const mutablePayload = { ...payload };
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const result = await supabase.from(addressesTable()).update(mutablePayload).eq("id", addressId).eq("user_id", userIdKey);
+    if (!result.error) {
+      return result;
+    }
+    const missing = missingColumnName(result.error);
+    if (!missing || !(missing in mutablePayload)) {
+      return result;
+    }
+    delete mutablePayload[missing];
+  }
+  return { error: { message: "Could not update address because of address schema mismatch." } };
+}
+
+async function buildUpdatedProfileResponse(
   supabase: ReturnType<typeof getSupabaseServerClient>,
   session: { sub: string; username: string; email: string }
-): Promise<ResolvedUser | null> {
-  const sub = session.sub.trim();
-
-  const bySub = await selectUsersWithRoleFallback(supabase, (fields) =>
-    supabase.from("users").select(fields).eq("id", sub).maybeSingle()
-  );
-  if (bySub.rows.length > 0) {
-    return bySub.rows[0];
+) {
+  const result = await loadCustomerProfileForSession(supabase, session);
+  if (!result.user) {
+    return NextResponse.json({ error: result.error }, { status: result.status });
   }
+  return NextResponse.json({ user: result.user });
+}
 
-  const sessionUserIdNum = Number(sub);
-  if (Number.isFinite(sessionUserIdNum) && /^[0-9]+$/.test(sub)) {
-    const byIdResult = await selectUsersWithRoleFallback(supabase, (fields) =>
-      supabase.from("users").select(fields).eq("id", sessionUserIdNum).maybeSingle()
-    );
-    if (byIdResult.rows.length > 0) {
-      return byIdResult.rows[0];
-    }
-  }
-
-  const byUsernameResult = await selectUsersWithRoleFallback(supabase, (fields) =>
-    supabase.from("users").select(fields).ilike("username", session.username).order("id", { ascending: true }).limit(1)
-  );
-  if (byUsernameResult.rows.length > 0) {
-    return byUsernameResult.rows[0];
-  }
-
-  const byEmailResult = await selectUsersWithRoleFallback(supabase, (fields) =>
-    supabase.from("users").select(fields).ilike("email", session.email).order("id", { ascending: true }).limit(1)
-  );
-  if (byEmailResult.rows.length > 0) {
-    return byEmailResult.rows[0];
-  }
-
-  const profileMatch = await supabase
-    .from("profiles")
-    .select("user_id")
-    .ilike("username", session.username)
-    .order("user_id", { ascending: true })
-    .limit(1);
-  if (profileMatch.error && !isMissingProfilesTable(profileMatch.error)) {
+async function ensureExactlyOneDefaultAddress(
+  supabase: ReturnType<typeof getSupabaseServerClient>,
+  userId: string,
+  userIdKey: string | number
+): Promise<{ message?: string } | null> {
+  const rows = await fetchUserAddresses(supabase, userId);
+  if (rows.length === 0) {
     return null;
   }
-  const matchedUserId =
-    Array.isArray(profileMatch.data) && profileMatch.data.length > 0
-      ? profileMatch.data[0]?.user_id
-      : null;
-  if (matchedUserId != null) {
-    const uid = userIdForDbQuery(matchedUserId as string | number);
-    const byProfileResult = await selectUsersWithRoleFallback(supabase, (fields) =>
-      supabase.from("users").select(fields).eq("id", uid).maybeSingle()
-    );
-    if (byProfileResult.rows.length > 0) {
-      return byProfileResult.rows[0];
-    }
+
+  const chosenDefault = rows.find((row) => row.is_default) ?? rows[0];
+  const addrTable = addressesTable();
+
+  const reset = await supabase.from(addrTable).update({ is_default: false }).eq("user_id", userIdKey);
+  if (reset.error && !isMissingUserAddressesTable(reset.error)) {
+    return { message: reset.error.message || "Could not normalize default address." };
+  }
+
+  const mark = await supabase
+    .from(addrTable)
+    .update({ is_default: true })
+    .eq("id", chosenDefault.id)
+    .eq("user_id", userIdKey);
+  if (mark.error && !isMissingUserAddressesTable(mark.error)) {
+    return { message: mark.error.message || "Could not normalize default address." };
   }
 
   return null;
-}
-
-function buildUserResponse(
-  data: ResolvedUser,
-  profileData: Record<string, unknown> | null | undefined,
-  addresses: UserAddressRow[]
-) {
-  return {
-    user: {
-      ...data,
-      username: data.username,
-      full_name: data.full_name ?? null,
-      avatar_url: (profileData?.avatar_url as string | null | undefined) ?? null,
-      phone: (profileData?.phone as string | null | undefined) ?? null,
-      gender: (profileData?.gender as string | null | undefined) ?? null,
-      dob: (profileData?.dob as string | null | undefined) ?? null,
-      addresses,
-    },
-  };
 }
 
 export async function GET(request: Request) {
@@ -179,65 +143,17 @@ export async function GET(request: Request) {
     );
   }
 
-  const data = await resolveSessionUser(supabase, {
+  const result = await loadCustomerProfileForSession(supabase, {
     sub: session.sub,
     username: session.username,
     email: session.email,
   });
 
-  if (!data) {
-    return NextResponse.json({ error: "Profile not found." }, { status: 404 });
+  if (!result.user) {
+    return NextResponse.json({ error: result.error }, { status: result.status });
   }
 
-  const uid = userIdForDbQuery(data.id);
-
-  const [{ data: profileData, error: profileError }, addresses] = await Promise.all([
-    supabase
-      .from("profiles")
-      .select(PROFILE_FIELDS)
-      .eq("user_id", uid)
-      .maybeSingle(),
-    fetchUserAddresses(supabase, data.id),
-  ]);
-
-  if (profileError && !isMissingProfilesTable(profileError)) {
-    return NextResponse.json({ error: profileError.message || "Could not load profile details." }, { status: 400 });
-  }
-
-  if (profileError && isMissingProfilesTable(profileError)) {
-    return NextResponse.json({
-      user: {
-        ...data,
-        avatar_url: null,
-        phone: null,
-        gender: null,
-        dob: null,
-        addresses,
-      },
-    });
-  }
-
-  if (!profileData) {
-    const { data: backfilledProfile, error: backfillError } = await supabase
-      .from("profiles")
-      .upsert(
-        {
-          user_id: uid,
-          username: data.username,
-          full_name: data.full_name ?? null,
-        },
-        { onConflict: "user_id" }
-      )
-      .select(PROFILE_FIELDS)
-      .maybeSingle();
-    if (backfillError && !isMissingProfilesTable(backfillError)) {
-      return NextResponse.json({ error: backfillError.message || "Could not load profile details." }, { status: 400 });
-    }
-    return NextResponse.json(
-      buildUserResponse(data, backfilledProfile ?? profileData ?? undefined, addresses)
-    );
-  }
-  return NextResponse.json(buildUserResponse(data, profileData ?? undefined, addresses));
+  return NextResponse.json({ user: result.user });
 }
 
 export async function PUT(request: Request) {
@@ -267,20 +183,7 @@ export async function PUT(request: Request) {
 
   const userIdKey = userIdForDbQuery(resolvedUser.id);
 
-  let body: {
-    full_name?: unknown;
-    avatar_url?: unknown;
-    phone?: unknown;
-    gender?: unknown;
-    dob?: unknown;
-    address_label?: unknown;
-    address_line1?: unknown;
-    address_line2?: unknown;
-    address_city?: unknown;
-    address_state?: unknown;
-    address_postal_code?: unknown;
-    address_country?: unknown;
-  };
+  let body: ProfileRequestBody;
   try {
     body = (await request.json()) as typeof body;
   } catch {
@@ -307,20 +210,31 @@ export async function PUT(request: Request) {
     profileExtras.dob = typeof body.dob === "string" && body.dob.trim() ? body.dob.trim() : null;
   }
 
+  const hasAddressField =
+    has("address_label") ||
+    has("address_recipient_name") ||
+    has("address_line1") ||
+    has("address_line2") ||
+    has("address_city") ||
+    has("address_state") ||
+    has("address_postal_code") ||
+    has("address_country");
   const addrLine1 = cleanString(body.address_line1);
   const addrCity = cleanString(body.address_city);
   const addrState = cleanString(body.address_state);
   const addrPostal = cleanString(body.address_postal_code);
   const addrCountry = cleanString(body.address_country);
-  const addressComplete = Boolean(addrLine1 && addrCity && addrState && addrPostal && addrCountry);
-  if (!addressComplete) {
-    return NextResponse.json(
-      {
-        error:
-          "Shipping address is required: line 1, city, state or region, postal code, and country.",
-      },
-      { status: 400 }
-    );
+  if (hasAddressField) {
+    const addressComplete = Boolean(addrLine1 && addrCity && addrState && addrPostal && addrCountry);
+    if (!addressComplete) {
+      return NextResponse.json(
+        {
+          error:
+            "Shipping address is required: line 1, city, state or region, postal code, and country.",
+        },
+        { status: 400 }
+      );
+    }
   }
 
   if (Object.keys(userUpdatePayload).length > 0) {
@@ -373,20 +287,23 @@ export async function PUT(request: Request) {
     );
   }
 
-  const addrResult = await upsertDefaultUserAddress(supabase, resolvedUser.id, {
-    label: cleanString(body.address_label) ?? "Home",
-    line1: addrLine1!,
-    line2: cleanString(body.address_line2),
-    city: addrCity!,
-    state: addrState!,
-    postal_code: addrPostal!,
-    country: addrCountry!,
-  });
-  if (addrResult.error && !isMissingUserAddressesTable(addrResult.error)) {
-    return NextResponse.json(
-      { error: addrResult.error.message || "Could not save address." },
-      { status: 400 }
-    );
+  if (hasAddressField) {
+    const addrResult = await upsertDefaultUserAddress(supabase, resolvedUser.id, {
+      label: cleanString(body.address_label) ?? "Home",
+      recipient_name: cleanString(body.address_recipient_name),
+      address_line1: addrLine1!,
+      address_line2: cleanString(body.address_line2),
+      city: addrCity!,
+      state: addrState!,
+      postal_code: addrPostal!,
+      country: addrCountry!,
+    });
+    if (addrResult.error && !isMissingUserAddressesTable(addrResult.error)) {
+      return NextResponse.json(
+        { error: addrResult.error.message || "Could not save address." },
+        { status: 400 }
+      );
+    }
   }
 
   const refreshedUser: ResolvedUser = canonicalUser;
@@ -420,4 +337,179 @@ export async function PUT(request: Request) {
       addresses,
     },
   });
+}
+
+export async function PATCH(request: Request) {
+  const session = await getCustomerFromRequest(request);
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  let supabase;
+  try {
+    supabase = getSupabaseServerClient();
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Profile API not configured." },
+      { status: 503 }
+    );
+  }
+
+  const resolvedUser = await resolveSessionUser(supabase, {
+    sub: session.sub,
+    username: session.username,
+    email: session.email,
+  });
+  if (!resolvedUser) {
+    return NextResponse.json({ error: "Profile not found." }, { status: 404 });
+  }
+
+  let body: ProfileRequestBody;
+  try {
+    body = (await request.json()) as ProfileRequestBody;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON." }, { status: 400 });
+  }
+
+  const action = String(body.action ?? "").trim();
+  const addrTable = addressesTable();
+  const userIdKey = userIdForDbQuery(resolvedUser.id);
+  const addressId = cleanString(body.addressId);
+
+  const { data: prof } = await supabase.from("profiles").select("id").eq("user_id", userIdKey).maybeSingle();
+  const profileId = prof?.id != null ? String(prof.id) : null;
+
+  if (action === "address_add") {
+    const address = body.address ?? {};
+    const line1 = cleanString(address.address_line1);
+    const city = cleanString(address.address_city ?? address.city);
+    const state = cleanString(address.address_state ?? address.state);
+    const postal = cleanString(address.address_postal_code ?? address.postal_code);
+    const country = cleanString(address.address_country ?? address.country) ?? "MY";
+    if (!line1 || !city || !state || !postal || !country) {
+      return NextResponse.json({ error: "Address line 1, city, state, postal code, and country are required." }, { status: 400 });
+    }
+    const label = cleanString(address.address_label ?? address.label) ?? "Home";
+    const recipientName = cleanString(address.address_recipient_name ?? address.recipient_name);
+    const line2 = cleanString(address.address_line2);
+    const setDefault = Boolean(address.set_default ?? body.set_default ?? false);
+
+    if (setDefault) {
+      const reset = await supabase.from(addrTable).update({ is_default: false }).eq("user_id", userIdKey);
+      if (reset.error && !isMissingUserAddressesTable(reset.error)) {
+        return NextResponse.json({ error: reset.error.message || "Could not update existing addresses." }, { status: 400 });
+      }
+    }
+
+    const insertRow: Record<string, unknown> = {
+      user_id: userIdKey,
+      label,
+      recipient_name: recipientName,
+      address_line1: line1,
+      address_line2: line2,
+      city,
+      state,
+      postal_code: postal,
+      country,
+      is_default: setDefault,
+    };
+    if (profileId) {
+      insertRow.profile_id = profileId;
+    }
+    const ins = await insertAddressWithSchemaFallback(supabase, insertRow);
+    if (ins.error && !isMissingUserAddressesTable(ins.error)) {
+      return NextResponse.json({ error: ins.error.message || "Could not add address." }, { status: 400 });
+    }
+
+    const defaultError = await ensureExactlyOneDefaultAddress(supabase, resolvedUser.id, userIdKey);
+    if (defaultError) {
+      return NextResponse.json({ error: defaultError.message || "Could not normalize default address." }, { status: 400 });
+    }
+    return buildUpdatedProfileResponse(supabase, session);
+  }
+
+  if (action === "address_update") {
+    if (!addressId) {
+      return NextResponse.json({ error: "Address id is required." }, { status: 400 });
+    }
+    const address = body.address ?? {};
+    const line1 = cleanString(address.address_line1);
+    const city = cleanString(address.address_city ?? address.city);
+    const state = cleanString(address.address_state ?? address.state);
+    const postal = cleanString(address.address_postal_code ?? address.postal_code);
+    const country = cleanString(address.address_country ?? address.country) ?? "MY";
+    if (!line1 || !city || !state || !postal || !country) {
+      return NextResponse.json({ error: "Address line 1, city, state, postal code, and country are required." }, { status: 400 });
+    }
+    const label = cleanString(address.address_label ?? address.label) ?? "Home";
+    const recipientName = cleanString(address.address_recipient_name ?? address.recipient_name);
+    const line2 = cleanString(address.address_line2);
+    const setDefault = Boolean(address.set_default ?? body.set_default ?? false);
+
+    if (setDefault) {
+      const reset = await supabase.from(addrTable).update({ is_default: false }).eq("user_id", userIdKey);
+      if (reset.error && !isMissingUserAddressesTable(reset.error)) {
+        return NextResponse.json({ error: reset.error.message || "Could not update existing addresses." }, { status: 400 });
+      }
+    }
+
+    const upd = await updateAddressWithSchemaFallback(supabase, addressId, userIdKey, {
+      label,
+      recipient_name: recipientName,
+      address_line1: line1,
+      address_line2: line2,
+      city,
+      state,
+      postal_code: postal,
+      country,
+      ...(setDefault ? { is_default: true } : {}),
+    });
+    if (upd.error && !isMissingUserAddressesTable(upd.error)) {
+      return NextResponse.json({ error: upd.error.message || "Could not update address." }, { status: 400 });
+    }
+
+    const defaultError = await ensureExactlyOneDefaultAddress(supabase, resolvedUser.id, userIdKey);
+    if (defaultError) {
+      return NextResponse.json({ error: defaultError.message || "Could not normalize default address." }, { status: 400 });
+    }
+    return buildUpdatedProfileResponse(supabase, session);
+  }
+
+  if (action === "address_delete") {
+    if (!addressId) {
+      return NextResponse.json({ error: "Address id is required." }, { status: 400 });
+    }
+    const del = await supabase.from(addrTable).delete().eq("id", addressId).eq("user_id", userIdKey);
+    if (del.error && !isMissingUserAddressesTable(del.error)) {
+      return NextResponse.json({ error: del.error.message || "Could not delete address." }, { status: 400 });
+    }
+
+    const defaultError = await ensureExactlyOneDefaultAddress(supabase, resolvedUser.id, userIdKey);
+    if (defaultError) {
+      return NextResponse.json({ error: defaultError.message || "Could not normalize default address." }, { status: 400 });
+    }
+    return buildUpdatedProfileResponse(supabase, session);
+  }
+
+  if (action === "address_set_default") {
+    if (!addressId) {
+      return NextResponse.json({ error: "Address id is required." }, { status: 400 });
+    }
+    const reset = await supabase.from(addrTable).update({ is_default: false }).eq("user_id", userIdKey);
+    if (reset.error && !isMissingUserAddressesTable(reset.error)) {
+      return NextResponse.json({ error: reset.error.message || "Could not update existing addresses." }, { status: 400 });
+    }
+    const mark = await supabase.from(addrTable).update({ is_default: true }).eq("id", addressId).eq("user_id", userIdKey);
+    if (mark.error && !isMissingUserAddressesTable(mark.error)) {
+      return NextResponse.json({ error: mark.error.message || "Could not set default address." }, { status: 400 });
+    }
+
+    const defaultError = await ensureExactlyOneDefaultAddress(supabase, resolvedUser.id, userIdKey);
+    if (defaultError) {
+      return NextResponse.json({ error: defaultError.message || "Could not normalize default address." }, { status: 400 });
+    }
+    return buildUpdatedProfileResponse(supabase, session);
+  }
+
+  return NextResponse.json({ error: "Unsupported profile patch action." }, { status: 400 });
 }

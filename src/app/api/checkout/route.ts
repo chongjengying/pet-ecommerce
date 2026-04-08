@@ -111,8 +111,8 @@ export async function POST(request: Request) {
         item_count: orderItems.length,
         shipping: {
           label: shipTo.label,
-          line1: shipTo.line1,
-          line2: shipTo.line2,
+          address_line1: shipTo.address_line1,
+          address_line2: shipTo.address_line2,
           city: shipTo.city,
           state: shipTo.state,
           postal_code: shipTo.postal_code,

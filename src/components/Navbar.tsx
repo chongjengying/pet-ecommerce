@@ -5,6 +5,7 @@ import { useCart } from "@/context/CartContext";
 import { getAvatarInitials, UserAvatar } from "@/components/ui/UserAvatar";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { clearProfileCache } from "@/lib/profileCache";
 
 /**
  * Edit this object to change header links and labels — same idea as `footerConfig` in `Footer.tsx`.
@@ -112,7 +113,7 @@ export default function Navbar() {
       window.removeEventListener("customer-auth-changed", onAuthChanged);
       window.removeEventListener("storage", onStorage);
     };
-  }, [pathname]);
+  }, []);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -133,6 +134,7 @@ export default function Navbar() {
 
   const onLogout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
+    clearProfileCache();
     localStorage.removeItem("customer_jwt_token");
     window.dispatchEvent(new Event("customer-auth-changed"));
     setIsAuthenticated(false);
@@ -232,6 +234,13 @@ export default function Navbar() {
                     className="block rounded-xl px-3 py-2 text-sm text-umber/90 transition hover:bg-amber-50"
                   >
                     Profile
+                  </Link>
+                  <Link
+                    href="/profile/orders"
+                    onClick={() => setMenuOpen(false)}
+                    className="block rounded-xl px-3 py-2 text-sm text-umber/90 transition hover:bg-amber-50"
+                  >
+                    Orders
                   </Link>
                   <button
                     type="button"
@@ -341,6 +350,13 @@ export default function Navbar() {
                     className="mt-1 block rounded-xl px-3 py-2.5 text-sm font-medium text-umber hover:bg-white/80"
                   >
                     Profile
+                  </Link>
+                  <Link
+                    href="/profile/orders"
+                    onClick={() => setMobileOpen(false)}
+                    className="mt-1 block rounded-xl px-3 py-2.5 text-sm font-medium text-umber hover:bg-white/80"
+                  >
+                    Orders
                   </Link>
                   <button
                     type="button"
