@@ -60,8 +60,16 @@ export default function Navbar() {
   const [authLoading, setAuthLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [username, setUsername] = useState<string>("");
+  const [fullName, setFullName] = useState<string>("");
+  const [email, setEmail] = useState<string>("");
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+
+  const cleanDisplayName = (value: string): string =>
+    value
+      .trim()
+      .replace(/^(mr|mrs|ms|miss|dr|prof)\.?\s+/i, "")
+      .replace(/\s+/g, " ");
 
   useEffect(() => {
     let active = true;
@@ -80,15 +88,23 @@ export default function Navbar() {
         if (!res.ok) {
           setIsAuthenticated(false);
           setUsername("");
+          setFullName("");
+          setEmail("");
           return;
         }
-        const payload = (await res.json().catch(() => ({}))) as { user?: { username?: string } };
+        const payload = (await res.json().catch(() => ({}))) as {
+          user?: { username?: string; full_name?: string | null; email?: string };
+        };
         setIsAuthenticated(true);
         setUsername(payload.user?.username ?? "");
+        setFullName(payload.user?.full_name ?? "");
+        setEmail(payload.user?.email ?? "");
       } catch {
         if (!active) return;
         setIsAuthenticated(false);
         setUsername("");
+        setFullName("");
+        setEmail("");
       } finally {
         if (!active) return;
         setAuthLoading(false);
@@ -139,12 +155,19 @@ export default function Navbar() {
     window.dispatchEvent(new Event("customer-auth-changed"));
     setIsAuthenticated(false);
     setUsername("");
+    setFullName("");
+    setEmail("");
     setMenuOpen(false);
     router.replace("/");
     router.refresh();
   };
 
-  const initials = useMemo(() => getAvatarInitials(null, username.trim() || "U"), [username]);
+  const displayName = useMemo(() => {
+    const cleaned = cleanDisplayName(fullName);
+    return cleaned || username.replace(/^@+/, "") || "Customer";
+  }, [fullName, username]);
+
+  const initials = useMemo(() => getAvatarInitials(displayName, username.trim() || "U"), [displayName, username]);
 
   const navLinkClass = (href: string) => {
     const active = linkIsActive(pathname, href);
@@ -210,45 +233,66 @@ export default function Navbar() {
                   className="rounded-full transition hover:opacity-[0.94] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sage/50"
                   aria-expanded={menuOpen}
                   aria-haspopup="true"
-                  aria-label={`Account menu, ${username || "signed in"}`}
+                  aria-label={`Account menu, ${displayName || "signed in"}`}
                 >
                   <UserAvatar
                     src={null}
-                    alt={username ? `Avatar for ${username.replace(/^@+/, "")}` : "Account"}
+                    alt={displayName ? `Avatar for ${displayName}` : "Account"}
                     initials={initials}
                     size="sm"
                   />
                 </button>
                 <div
-                  className={`absolute right-0 mt-2 w-52 origin-top-right rounded-2xl border border-amber-100/90 bg-white p-2 shadow-xl ring-1 ring-black/5 transition duration-200 ${
+                  className={`absolute right-0 mt-2 w-72 origin-top-right rounded-[28px] border border-amber-200/80 bg-[#fffdf8] p-6 shadow-[0_24px_60px_rgba(55,42,24,0.16)] ring-1 ring-amber-100/70 transition duration-150 ${
                     menuOpen ? "translate-y-0 opacity-100" : "pointer-events-none -translate-y-1 opacity-0"
                   }`}
                 >
-                  <p className="border-b border-amber-100 px-3 py-2.5 text-xs font-medium uppercase tracking-wide text-umber/45">
+                  <p className="font-mono text-xs font-semibold uppercase tracking-[0.22em] text-umber/65">
                     Signed in
                   </p>
-                  <p className="px-3 py-2 text-sm font-semibold text-umber">{username?.replace(/^@+/, "") || "customer"}</p>
-                  <Link
-                    href="/profile"
-                    onClick={() => setMenuOpen(false)}
-                    className="block rounded-xl px-3 py-2 text-sm text-umber/90 transition hover:bg-amber-50"
-                  >
-                    Profile
-                  </Link>
-                  <Link
-                    href="/profile/orders"
-                    onClick={() => setMenuOpen(false)}
-                    className="block rounded-xl px-3 py-2 text-sm text-umber/90 transition hover:bg-amber-50"
-                  >
-                    Orders
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={() => void onLogout()}
-                    className="w-full rounded-xl px-3 py-2 text-left text-sm text-umber/90 transition hover:bg-amber-50"
-                  >
-                    Sign out
-                  </button>
+                  <div className="mt-4 border-t border-dashed border-amber-300/90 pt-4">
+                    <div className="flex items-start gap-4">
+                      <div className="pt-0.5">
+                        <span className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-xl border border-amber-300/80 bg-white px-2 text-sm font-semibold text-umber">
+                          {initials}
+                        </span>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xl font-semibold tracking-tight text-umber">{displayName}</p>
+                        <p className="mt-1 break-all text-sm text-umber/70">{email || "No email available"}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-6 border-t border-dashed border-amber-300/90 pt-4">
+                    <Link
+                      href="/profile"
+                      onClick={() => setMenuOpen(false)}
+                      className="block rounded-xl px-3 py-2.5 text-base text-umber/90 transition hover:bg-amber-50"
+                    >
+                      Profile
+                    </Link>
+                    <Link
+                      href="/profile/orders"
+                      onClick={() => setMenuOpen(false)}
+                      className="block rounded-xl px-3 py-2.5 text-base text-umber/90 transition hover:bg-amber-50"
+                    >
+                      Orders
+                    </Link>
+                    <Link
+                      href="/address-book"
+                      onClick={() => setMenuOpen(false)}
+                      className="block rounded-xl px-3 py-2.5 text-base text-umber/90 transition hover:bg-amber-50"
+                    >
+                      Addresses
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => void onLogout()}
+                      className="mt-1 w-full rounded-xl px-3 py-2.5 text-left text-base text-umber/90 transition hover:bg-amber-50"
+                    >
+                      Sign out
+                    </button>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -343,7 +387,8 @@ export default function Navbar() {
               ) : isAuthenticated ? (
                 <>
                   <p className="px-3 py-1 text-xs font-medium uppercase tracking-wide text-umber/45">Account</p>
-                  <p className="px-3 py-1 text-sm font-semibold text-umber">{username?.replace(/^@+/, "") || "customer"}</p>
+                  <p className="px-3 py-1 text-sm font-semibold text-umber">{displayName}</p>
+                  <p className="px-3 pb-1 text-xs text-umber/60">{email || username?.replace(/^@+/, "")}</p>
                   <Link
                     href="/profile"
                     onClick={() => setMobileOpen(false)}
@@ -357,6 +402,13 @@ export default function Navbar() {
                     className="mt-1 block rounded-xl px-3 py-2.5 text-sm font-medium text-umber hover:bg-white/80"
                   >
                     Orders
+                  </Link>
+                  <Link
+                    href="/address-book"
+                    onClick={() => setMobileOpen(false)}
+                    className="mt-1 block rounded-xl px-3 py-2.5 text-sm font-medium text-umber hover:bg-white/80"
+                  >
+                    Addresses
                   </Link>
                   <button
                     type="button"

@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import type { CustomerOrderStatusData } from "@/lib/customerOrders";
 
 type OrderStatusClientProps = {
-  order: CustomerOrderStatusData | null;
+  orders: CustomerOrderStatusData[];
 };
 
 type ActionState = "idle" | "tracking" | "invoice" | "cancel" | "support";
@@ -94,6 +94,51 @@ function detailLine(values: Array<string | null | undefined>): string {
   return values.filter((value): value is string => typeof value === "string" && value.trim().length > 0).join(", ");
 }
 
+function buildInvoiceText(order: CustomerOrderStatusData): string {
+  const shippingLine = detailLine([
+    order.shipping.addressLine1,
+    order.shipping.addressLine2,
+    order.shipping.city,
+    order.shipping.state,
+    order.shipping.postalCode,
+    order.shipping.country,
+  ]);
+
+  const lines = [
+    "PAWLUXE INVOICE",
+    "",
+    `Order Number: ${order.orderNumber}`,
+    `Order Date: ${formatDate(order.createdAt)}`,
+    `Order Status: ${formatStatus(order.status)}`,
+    "",
+    "Items:",
+    ...order.items.map(
+      (item) =>
+        `- ${item.name} x${item.quantity} @ ${formatCurrency(item.unitPrice, order.currency)} = ${formatCurrency(
+          item.totalPrice,
+          order.currency
+        )}`
+    ),
+    "",
+    `Subtotal: ${formatCurrency(order.subtotal, order.currency)}`,
+    `Shipping: ${formatCurrency(order.shippingFee, order.currency)}`,
+    `Tax: ${formatCurrency(order.taxAmount, order.currency)}`,
+    `Total Paid: ${formatCurrency(order.totalAmount, order.currency)}`,
+    "",
+    "Shipping:",
+    `Recipient: ${order.shipping.recipientName ?? "-"}`,
+    `Phone: ${order.shipping.phone ?? "-"}`,
+    `Address: ${shippingLine || "-"}`,
+    "",
+    "Payment:",
+    `Status: ${order.payment.status}`,
+    `Method: ${order.payment.method}`,
+    `Reference: ${order.payment.cardLabel ?? "-"}`,
+  ];
+
+  return lines.join("\n");
+}
+
 function ActionButton({
   label,
   tone,
@@ -123,9 +168,16 @@ function ActionButton({
   );
 }
 
-export default function OrderStatusClient({ order }: OrderStatusClientProps) {
+export default function OrderStatusClient({ orders }: OrderStatusClientProps) {
   const [actionState, setActionState] = useState<ActionState>("idle");
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+
+  const order = useMemo(() => {
+    if (!orders.length) return null;
+    if (!selectedOrderId) return orders[0];
+    return orders.find((entry) => entry.id === selectedOrderId) ?? orders[0];
+  }, [orders, selectedOrderId]);
 
   const progress = useMemo(() => buildProgress(order), [order]);
 
@@ -135,7 +187,29 @@ export default function OrderStatusClient({ order }: OrderStatusClientProps) {
     window.setTimeout(() => setActionState("idle"), 500);
   };
 
-  if (!order) {
+  const downloadInvoice = (orderToDownload: CustomerOrderStatusData) => {
+    try {
+      setActionState("invoice");
+      const invoiceText = buildInvoiceText(orderToDownload);
+      const blob = new Blob([invoiceText], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      const safeOrderNumber = orderToDownload.orderNumber.replace(/[^a-zA-Z0-9-_]/g, "_");
+      anchor.href = url;
+      anchor.download = `invoice-${safeOrderNumber || orderToDownload.id}.txt`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+      setFeedback("Invoice downloaded.");
+    } catch (error) {
+      setFeedback(`Invoice download failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+    } finally {
+      window.setTimeout(() => setActionState("idle"), 500);
+    }
+  };
+
+  if (!orders.length || !order) {
     return (
       <div className="overflow-hidden rounded-[32px] border border-amber-200/70 bg-white shadow-[0_18px_60px_rgba(44,36,32,0.08)]">
         <div className="bg-[radial-gradient(circle_at_top_left,_rgba(120,146,111,0.18),_transparent_34%),linear-gradient(135deg,rgba(255,255,255,1),rgba(248,242,229,0.92),rgba(255,249,240,0.92))] px-6 py-10 sm:px-10">
@@ -171,6 +245,25 @@ export default function OrderStatusClient({ order }: OrderStatusClientProps) {
   return (
     <div className="overflow-hidden rounded-[32px] border border-amber-200/70 bg-white shadow-[0_18px_60px_rgba(44,36,32,0.08)]">
       <div className="bg-[radial-gradient(circle_at_top_left,_rgba(120,146,111,0.18),_transparent_32%),linear-gradient(135deg,rgba(255,255,255,1),rgba(247,242,232,0.96),rgba(255,250,242,0.95))] px-6 py-8 sm:px-10 sm:py-10">
+        <div className="mb-6 rounded-3xl border border-amber-100/90 bg-white/92 p-4 sm:p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm font-semibold text-umber">
+              {orders.length} order{orders.length === 1 ? "" : "s"} in your history
+            </p>
+            <select
+              value={order.id}
+              onChange={(event) => setSelectedOrderId(event.target.value)}
+              className="min-h-[44px] rounded-2xl border border-amber-200 bg-white px-3 py-2 text-sm font-semibold text-umber"
+            >
+              {orders.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.orderNumber} - {formatDate(entry.createdAt)}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
         <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
           <div className="max-w-3xl">
             <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-umber/45">Order status</p>
@@ -312,7 +405,7 @@ export default function OrderStatusClient({ order }: OrderStatusClientProps) {
                   label="Download Invoice"
                   tone="secondary"
                   busy={actionState === "invoice"}
-                  onClick={() => runAction("invoice", "Invoice export UI is ready. Hook this action to your PDF or email invoice endpoint.")}
+                  onClick={() => downloadInvoice(order)}
                 />
                 <ActionButton
                   label="Contact Support"
@@ -361,6 +454,9 @@ export default function OrderStatusClient({ order }: OrderStatusClientProps) {
                 <div className="rounded-3xl border border-amber-100/80 bg-cream/40 p-4">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-umber/45">Recipient</p>
                   <p className="mt-2 text-sm font-semibold text-umber">{order.shipping.recipientName ?? "Recipient not provided"}</p>
+                  {order.shipping.phone ? (
+                    <p className="mt-1 text-sm text-umber/68">{order.shipping.phone}</p>
+                  ) : null}
                   <p className="mt-1 text-sm leading-6 text-umber/68">{shippingLine || "Shipping address will appear after checkout metadata is connected."}</p>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">

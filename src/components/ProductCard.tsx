@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
+import { useState } from "react";
 import { Product } from "@/types";
 import { useCart } from "@/context/CartContext";
 import { resolveProductImageUrl } from "@/lib/productImage";
@@ -27,6 +28,8 @@ function CartIcon({ className }: { className?: string }) {
 
 export default function ProductCard({ product }: { product: Product }) {
   const { addToCart, items } = useCart();
+  const [isAdding, setIsAdding] = useState(false);
+  const [added, setAdded] = useState(false);
   const imageUrl = resolveProductImageUrl(product);
   const warehouseStock = getStock(product);
   const inCartQty = items.find((i) => String(i.id) === String(product.id))?.quantity ?? 0;
@@ -40,6 +43,16 @@ export default function ProductCard({ product }: { product: Product }) {
   const price = Number(product.price ?? 0);
   const lowStock =
     !outOfStock && availableToBuy !== undefined && availableToBuy > 0 && availableToBuy <= 5;
+
+  const handleAddToCart = async () => {
+    if (outOfStock || isAdding) return;
+    setIsAdding(true);
+    const ok = await addToCart({ ...product, image: imageUrl, category: product.category ?? "" });
+    setIsAdding(false);
+    if (!ok) return;
+    setAdded(true);
+    window.setTimeout(() => setAdded(false), 1600);
+  };
 
   return (
     <article className="group flex h-full flex-col overflow-hidden rounded-2xl border border-amber-200/70 bg-white shadow-[0_2px_12px_rgba(44,36,32,0.04)] ring-1 ring-black/[0.03] transition duration-300 hover:-translate-y-1 hover:shadow-[0_16px_40px_rgba(44,36,32,0.09)] hover:ring-amber-200/60">
@@ -108,13 +121,13 @@ export default function ProductCard({ product }: { product: Product }) {
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            if (!outOfStock) addToCart({ ...product, image: imageUrl, category: product.category ?? "" });
+            void handleAddToCart();
           }}
-          disabled={outOfStock}
+          disabled={outOfStock || isAdding}
           className="flex w-full items-center justify-center gap-2 rounded-xl bg-terracotta py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-terracotta/92 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sage disabled:cursor-not-allowed disabled:bg-umber/30 disabled:text-white/85 disabled:shadow-none"
         >
           <CartIcon className="h-4 w-4 shrink-0 opacity-95" />
-          {outOfStock ? "Unavailable" : inCartQty > 0 ? "Add another" : "Add to cart"}
+          {outOfStock ? "Unavailable" : isAdding ? "Adding..." : added ? "Added" : inCartQty > 0 ? "Add another" : "Add to cart"}
         </button>
       </div>
     </article>

@@ -38,29 +38,30 @@ create table if not exists public.profiles (
 
 create index if not exists idx_profiles_user_id on public.profiles (user_id);
 
--- Saved shipping / billing addresses: tied to both users (account) and profiles (customer record).
+-- Saved shipping / billing addresses: child rows of users.
 create table if not exists public.user_addresses (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.users (id) on delete cascade,
-  profile_id uuid not null references public.profiles (id) on delete cascade,
   label text not null default 'Home',
-  line1 text not null,
-  line2 text,
+  recipient_name text,
+  address_line1 text not null,
+  address_line2 text,
   city text not null,
   state text,
   postal_code text,
   country text not null default 'MY',
   is_default boolean not null default false,
+  is_default_shipping boolean not null default false,
+  is_default_billing boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
 create index if not exists idx_user_addresses_user_id on public.user_addresses (user_id);
-create index if not exists idx_user_addresses_profile_id on public.user_addresses (profile_id);
 
--- At most one default address per profile (Postgres partial unique index)
-create unique index if not exists user_addresses_one_default_per_profile
-  on public.user_addresses (profile_id)
+-- At most one default address per user (Postgres partial unique index)
+create unique index if not exists user_addresses_one_default_per_user
+  on public.user_addresses (user_id)
   where is_default = true;
 
 -- Optional: keep profiles.updated_at in sync (reuse if you already have this function)

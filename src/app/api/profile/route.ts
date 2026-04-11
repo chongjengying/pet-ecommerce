@@ -36,6 +36,7 @@ type ProfileRequestBody = {
   addressId?: unknown;
   address?: Record<string, unknown> | null;
   set_default?: unknown;
+  defaultType?: unknown;
 };
 
 function missingColumnName(error: unknown): string | null {
@@ -73,7 +74,11 @@ async function updateAddressWithSchemaFallback(
 ) {
   const mutablePayload = { ...payload };
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    const result = await supabase.from(addressesTable()).update(mutablePayload).eq("id", addressId).eq("user_id", userIdKey);
+    const result = await supabase
+      .from(addressesTable())
+      .update(mutablePayload)
+      .eq("id", addressId)
+      .eq("user_id", userIdKey);
     if (!result.error) {
       return result;
     }
@@ -107,24 +112,86 @@ async function ensureExactlyOneDefaultAddress(
     return null;
   }
 
-  const chosenDefault = rows.find((row) => row.is_default) ?? rows[0];
+  const chosenDefault = rows.find((row) => row.is_default_shipping ?? row.is_default) ?? rows[0];
   const addrTable = addressesTable();
 
   const reset = await supabase.from(addrTable).update({ is_default: false }).eq("user_id", userIdKey);
-  if (reset.error && !isMissingUserAddressesTable(reset.error)) {
+  if (reset.error && !isMissingUserAddressesTable(reset.error) && !isMissingColumn(reset.error, "is_default")) {
     return { message: reset.error.message || "Could not normalize default address." };
   }
 
-  const mark = await supabase
-    .from(addrTable)
-    .update({ is_default: true })
-    .eq("id", chosenDefault.id)
-    .eq("user_id", userIdKey);
-  if (mark.error && !isMissingUserAddressesTable(mark.error)) {
+  const resetShipping = await supabase.from(addrTable).update({ is_default_shipping: false }).eq("user_id", userIdKey);
+  if (
+    resetShipping.error &&
+    !isMissingUserAddressesTable(resetShipping.error) &&
+    !isMissingColumn(resetShipping.error, "is_default_shipping")
+  ) {
+    return { message: resetShipping.error.message || "Could not normalize default address." };
+  }
+
+  const mark = await supabase.from(addrTable).update({ is_default: true }).eq("id", chosenDefault.id).eq("user_id", userIdKey);
+  if (mark.error && !isMissingUserAddressesTable(mark.error) && !isMissingColumn(mark.error, "is_default")) {
     return { message: mark.error.message || "Could not normalize default address." };
   }
 
+  const markShipping = await supabase
+    .from(addrTable)
+    .update({ is_default_shipping: true })
+    .eq("id", chosenDefault.id)
+    .eq("user_id", userIdKey);
+  if (
+    markShipping.error &&
+    !isMissingUserAddressesTable(markShipping.error) &&
+    !isMissingColumn(markShipping.error, "is_default_shipping")
+  ) {
+    return { message: markShipping.error.message || "Could not normalize default address." };
+  }
+
   return null;
+}
+
+function isMissingColumn(error: unknown, column: string): boolean {
+  const message = String((error as { message?: string })?.message ?? "").toLowerCase();
+  return (
+    message.includes(column.toLowerCase()) &&
+    message.includes("column") &&
+    (message.includes("could not find") || message.includes("does not exist"))
+  );
+}
+
+function buildAddressWritePayload(input: {
+  label: string;
+  recipientName: string | null;
+  line1: string;
+  line2: string | null;
+  city: string;
+  state: string;
+  postal: string;
+  country: string;
+  setDefaultShipping?: boolean;
+  setDefaultBilling?: boolean;
+}): Record<string, unknown> {
+  return {
+    label: input.label,
+    recipient_name: input.recipientName,
+    address_line1: input.line1,
+    address_line2: input.line2,
+    city: input.city,
+    state: input.state,
+    postal_code: input.postal,
+    country: input.country,
+    ...(typeof input.setDefaultShipping === "boolean"
+      ? {
+          is_default: input.setDefaultShipping,
+          is_default_shipping: input.setDefaultShipping,
+        }
+      : {}),
+    ...(typeof input.setDefaultBilling === "boolean"
+      ? {
+          is_default_billing: input.setDefaultBilling,
+        }
+      : {}),
+  };
 }
 
 export async function GET(request: Request) {
@@ -280,13 +347,6 @@ export async function PUT(request: Request) {
     profileData = upsertedProfile as Record<string, unknown>;
   }
 
-  if (profilesTableMissing) {
-    return NextResponse.json(
-      { error: "Profile storage is required to save your shipping address." },
-      { status: 503 }
-    );
-  }
-
   if (hasAddressField) {
     const addrResult = await upsertDefaultUserAddress(supabase, resolvedUser.id, {
       label: cleanString(body.address_label) ?? "Home",
@@ -376,9 +436,6 @@ export async function PATCH(request: Request) {
   const userIdKey = userIdForDbQuery(resolvedUser.id);
   const addressId = cleanString(body.addressId);
 
-  const { data: prof } = await supabase.from("profiles").select("id").eq("user_id", userIdKey).maybeSingle();
-  const profileId = prof?.id != null ? String(prof.id) : null;
-
   if (action === "address_add") {
     const address = body.address ?? {};
     const line1 = cleanString(address.address_line1);
@@ -392,30 +449,56 @@ export async function PATCH(request: Request) {
     const label = cleanString(address.address_label ?? address.label) ?? "Home";
     const recipientName = cleanString(address.address_recipient_name ?? address.recipient_name);
     const line2 = cleanString(address.address_line2);
-    const setDefault = Boolean(address.set_default ?? body.set_default ?? false);
+    const setDefaultShipping = Boolean(
+      address.set_default_shipping ?? address.set_default ?? body.set_default ?? false
+    );
+    const setDefaultBilling = Boolean(address.set_default_billing ?? false);
 
-    if (setDefault) {
+    if (setDefaultShipping) {
       const reset = await supabase.from(addrTable).update({ is_default: false }).eq("user_id", userIdKey);
-      if (reset.error && !isMissingUserAddressesTable(reset.error)) {
+      if (reset.error && !isMissingUserAddressesTable(reset.error) && !isMissingColumn(reset.error, "is_default")) {
         return NextResponse.json({ error: reset.error.message || "Could not update existing addresses." }, { status: 400 });
+      }
+
+      const resetShipping = await supabase.from(addrTable).update({ is_default_shipping: false }).eq("user_id", userIdKey);
+      if (
+        resetShipping.error &&
+        !isMissingUserAddressesTable(resetShipping.error) &&
+        !isMissingColumn(resetShipping.error, "is_default_shipping")
+      ) {
+        return NextResponse.json({ error: resetShipping.error.message || "Could not update existing addresses." }, { status: 400 });
+      }
+    }
+
+    if (setDefaultBilling) {
+      const resetBilling = await supabase.from(addrTable).update({ is_default_billing: false }).eq("user_id", userIdKey);
+      if (
+        resetBilling.error &&
+        !isMissingUserAddressesTable(resetBilling.error) &&
+        !isMissingColumn(resetBilling.error, "is_default_billing")
+      ) {
+        return NextResponse.json(
+          { error: resetBilling.error.message || "Could not update existing billing defaults." },
+          { status: 400 }
+        );
       }
     }
 
     const insertRow: Record<string, unknown> = {
       user_id: userIdKey,
-      label,
-      recipient_name: recipientName,
-      address_line1: line1,
-      address_line2: line2,
-      city,
-      state,
-      postal_code: postal,
-      country,
-      is_default: setDefault,
+      ...buildAddressWritePayload({
+        label,
+        recipientName,
+        line1,
+        line2,
+        city,
+        state,
+        postal,
+        country,
+        setDefaultShipping,
+        setDefaultBilling,
+      }),
     };
-    if (profileId) {
-      insertRow.profile_id = profileId;
-    }
     const ins = await insertAddressWithSchemaFallback(supabase, insertRow);
     if (ins.error && !isMissingUserAddressesTable(ins.error)) {
       return NextResponse.json({ error: ins.error.message || "Could not add address." }, { status: 400 });
@@ -444,26 +527,58 @@ export async function PATCH(request: Request) {
     const label = cleanString(address.address_label ?? address.label) ?? "Home";
     const recipientName = cleanString(address.address_recipient_name ?? address.recipient_name);
     const line2 = cleanString(address.address_line2);
-    const setDefault = Boolean(address.set_default ?? body.set_default ?? false);
+    const setDefaultShipping = Boolean(
+      address.set_default_shipping ?? address.set_default ?? body.set_default ?? false
+    );
+    const setDefaultBilling = Boolean(address.set_default_billing ?? false);
 
-    if (setDefault) {
+    if (setDefaultShipping) {
       const reset = await supabase.from(addrTable).update({ is_default: false }).eq("user_id", userIdKey);
-      if (reset.error && !isMissingUserAddressesTable(reset.error)) {
+      if (reset.error && !isMissingUserAddressesTable(reset.error) && !isMissingColumn(reset.error, "is_default")) {
         return NextResponse.json({ error: reset.error.message || "Could not update existing addresses." }, { status: 400 });
+      }
+
+      const resetShipping = await supabase.from(addrTable).update({ is_default_shipping: false }).eq("user_id", userIdKey);
+      if (
+        resetShipping.error &&
+        !isMissingUserAddressesTable(resetShipping.error) &&
+        !isMissingColumn(resetShipping.error, "is_default_shipping")
+      ) {
+        return NextResponse.json({ error: resetShipping.error.message || "Could not update existing addresses." }, { status: 400 });
       }
     }
 
-    const upd = await updateAddressWithSchemaFallback(supabase, addressId, userIdKey, {
-      label,
-      recipient_name: recipientName,
-      address_line1: line1,
-      address_line2: line2,
-      city,
-      state,
-      postal_code: postal,
-      country,
-      ...(setDefault ? { is_default: true } : {}),
-    });
+    if (setDefaultBilling) {
+      const resetBilling = await supabase.from(addrTable).update({ is_default_billing: false }).eq("user_id", userIdKey);
+      if (
+        resetBilling.error &&
+        !isMissingUserAddressesTable(resetBilling.error) &&
+        !isMissingColumn(resetBilling.error, "is_default_billing")
+      ) {
+        return NextResponse.json(
+          { error: resetBilling.error.message || "Could not update existing billing defaults." },
+          { status: 400 }
+        );
+      }
+    }
+
+    const upd = await updateAddressWithSchemaFallback(
+      supabase,
+      addressId,
+      userIdKey,
+      buildAddressWritePayload({
+        label,
+        recipientName,
+        line1,
+        line2,
+        city,
+        state,
+        postal,
+        country,
+        setDefaultShipping,
+        setDefaultBilling,
+      })
+    );
     if (upd.error && !isMissingUserAddressesTable(upd.error)) {
       return NextResponse.json({ error: upd.error.message || "Could not update address." }, { status: 400 });
     }
@@ -495,13 +610,102 @@ export async function PATCH(request: Request) {
     if (!addressId) {
       return NextResponse.json({ error: "Address id is required." }, { status: 400 });
     }
-    const reset = await supabase.from(addrTable).update({ is_default: false }).eq("user_id", userIdKey);
-    if (reset.error && !isMissingUserAddressesTable(reset.error)) {
-      return NextResponse.json({ error: reset.error.message || "Could not update existing addresses." }, { status: 400 });
-    }
-    const mark = await supabase.from(addrTable).update({ is_default: true }).eq("id", addressId).eq("user_id", userIdKey);
-    if (mark.error && !isMissingUserAddressesTable(mark.error)) {
-      return NextResponse.json({ error: mark.error.message || "Could not set default address." }, { status: 400 });
+    const defaultTypeRaw = String(body.defaultType ?? "shipping").trim().toLowerCase();
+    const defaultType: "shipping" | "billing" = defaultTypeRaw === "billing" ? "billing" : "shipping";
+
+    if (defaultType === "billing") {
+      const resetBilling = await supabase.from(addrTable).update({ is_default_billing: false }).eq("user_id", userIdKey);
+      if (
+        resetBilling.error &&
+        !isMissingUserAddressesTable(resetBilling.error) &&
+        !isMissingColumn(resetBilling.error, "is_default_billing")
+      ) {
+        return NextResponse.json(
+          { error: resetBilling.error.message || "Could not update existing billing defaults." },
+          { status: 400 }
+        );
+      }
+
+      if (resetBilling.error && isMissingColumn(resetBilling.error, "is_default_billing")) {
+        const resetShippingFallback = await supabase.from(addrTable).update({ is_default: false }).eq("user_id", userIdKey);
+        if (resetShippingFallback.error && !isMissingUserAddressesTable(resetShippingFallback.error)) {
+          return NextResponse.json(
+            { error: resetShippingFallback.error.message || "Could not update existing addresses." },
+            { status: 400 }
+          );
+        }
+        const markShippingFallback = await supabase
+          .from(addrTable)
+          .update({ is_default: true })
+          .eq("id", addressId)
+          .eq("user_id", userIdKey);
+        if (markShippingFallback.error && !isMissingUserAddressesTable(markShippingFallback.error)) {
+          return NextResponse.json(
+            { error: markShippingFallback.error.message || "Could not set default billing address." },
+            { status: 400 }
+          );
+        }
+      } else {
+        const markBilling = await supabase
+          .from(addrTable)
+          .update({ is_default_billing: true })
+          .eq("id", addressId)
+          .eq("user_id", userIdKey);
+        if (
+          markBilling.error &&
+          !isMissingUserAddressesTable(markBilling.error) &&
+          !isMissingColumn(markBilling.error, "is_default_billing")
+        ) {
+          return NextResponse.json(
+            { error: markBilling.error.message || "Could not set default billing address." },
+            { status: 400 }
+          );
+        }
+      }
+    } else {
+      const reset = await supabase.from(addrTable).update({ is_default: false }).eq("user_id", userIdKey);
+      if (reset.error && !isMissingUserAddressesTable(reset.error) && !isMissingColumn(reset.error, "is_default")) {
+        return NextResponse.json({ error: reset.error.message || "Could not update existing addresses." }, { status: 400 });
+      }
+
+      const resetShipping = await supabase.from(addrTable).update({ is_default_shipping: false }).eq("user_id", userIdKey);
+      if (
+        resetShipping.error &&
+        !isMissingUserAddressesTable(resetShipping.error) &&
+        !isMissingColumn(resetShipping.error, "is_default_shipping")
+      ) {
+        return NextResponse.json({ error: resetShipping.error.message || "Could not update existing addresses." }, { status: 400 });
+      }
+
+      const mark = await supabase
+        .from(addrTable)
+        .update({ is_default: true, is_default_shipping: true })
+        .eq("id", addressId)
+        .eq("user_id", userIdKey);
+      if (
+        mark.error &&
+        !isMissingUserAddressesTable(mark.error) &&
+        !isMissingColumn(mark.error, "is_default_shipping") &&
+        !isMissingColumn(mark.error, "is_default")
+      ) {
+        return NextResponse.json({ error: mark.error.message || "Could not set default shipping address." }, { status: 400 });
+      }
+      if (
+        mark.error &&
+        (isMissingColumn(mark.error, "is_default_shipping") || isMissingColumn(mark.error, "is_default"))
+      ) {
+        const shippingFallback = await supabase
+          .from(addrTable)
+          .update({ is_default_shipping: true })
+          .eq("id", addressId)
+          .eq("user_id", userIdKey);
+        if (shippingFallback.error && !isMissingUserAddressesTable(shippingFallback.error)) {
+          return NextResponse.json(
+            { error: shippingFallback.error.message || "Could not set default shipping address." },
+            { status: 400 }
+          );
+        }
+      }
     }
 
     const defaultError = await ensureExactlyOneDefaultAddress(supabase, resolvedUser.id, userIdKey);

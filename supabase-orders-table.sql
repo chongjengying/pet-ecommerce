@@ -8,25 +8,49 @@ create table if not exists orders (
   order_number text unique default ('ORD-' || lpad(nextval('order_number_seq')::text, 6, '0')),
   created_at timestamptz not null default now(),
   status text not null default 'completed',
-  user_id uuid null references auth.users(id) on delete set null,
+  payment_status text not null default 'paid',
+  shipping_method text null,
+  tracking_number text null,
+  user_id text null,
   subtotal numeric not null default 0 check (subtotal >= 0),
   shipping_fee numeric not null default 0 check (shipping_fee >= 0),
   tax_amount numeric not null default 0 check (tax_amount >= 0),
+  discount numeric not null default 0 check (discount >= 0),
   total_amount numeric not null default 0 check (total_amount >= 0),
   currency text not null default 'MYR',
   notes text null,
+  shipping_name text null,
+  shipping_phone text null,
+  shipping_address_line_1 text null,
+  shipping_address_line_2 text null,
+  shipping_city text null,
+  shipping_state text null,
+  shipping_postal_code text null,
+  shipping_country text null,
   metadata jsonb null
 );
 
 -- Backfill/upgrade for existing orders table
 alter table orders add column if not exists order_number text;
-alter table orders add column if not exists user_id uuid null references auth.users(id) on delete set null;
+alter table orders add column if not exists user_id text null;
 alter table orders add column if not exists subtotal numeric not null default 0;
 alter table orders add column if not exists shipping_fee numeric not null default 0;
 alter table orders add column if not exists tax_amount numeric not null default 0;
+alter table orders add column if not exists discount numeric not null default 0;
 alter table orders add column if not exists total_amount numeric not null default 0;
 alter table orders add column if not exists currency text not null default 'MYR';
+alter table orders add column if not exists payment_status text not null default 'paid';
+alter table orders add column if not exists shipping_method text null;
+alter table orders add column if not exists tracking_number text null;
 alter table orders add column if not exists notes text null;
+alter table orders add column if not exists shipping_name text null;
+alter table orders add column if not exists shipping_phone text null;
+alter table orders add column if not exists shipping_address_line_1 text null;
+alter table orders add column if not exists shipping_address_line_2 text null;
+alter table orders add column if not exists shipping_city text null;
+alter table orders add column if not exists shipping_state text null;
+alter table orders add column if not exists shipping_postal_code text null;
+alter table orders add column if not exists shipping_country text null;
 alter table orders add column if not exists metadata jsonb null;
 alter table orders drop column if exists discount_total;
 
@@ -35,6 +59,85 @@ alter table orders alter column order_number set default ('ORD-' || lpad(nextval
 update orders
 set order_number = ('ORD-' || lpad(nextval('order_number_seq')::text, 6, '0'))
 where order_number is null or order_number = '';
+
+-- Align orders.user_id to public.users(id) and ensure FK exists.
+do $$
+declare
+  orders_user_type text;
+  users_id_type text;
+  fk record;
+begin
+  if to_regclass('public.users') is null then
+    raise exception 'Table public.users does not exist.';
+  end if;
+
+  select pg_catalog.format_type(a.atttypid, a.atttypmod)
+    into orders_user_type
+  from pg_attribute a
+  where a.attrelid = 'public.orders'::regclass
+    and a.attname = 'user_id'
+    and not a.attisdropped;
+
+  select pg_catalog.format_type(a.atttypid, a.atttypmod)
+    into users_id_type
+  from pg_attribute a
+  where a.attrelid = 'public.users'::regclass
+    and a.attname = 'id'
+    and not a.attisdropped;
+
+  if users_id_type is null then
+    raise exception 'Column public.users.id does not exist.';
+  end if;
+
+  for fk in
+    select tc.constraint_name
+    from information_schema.table_constraints tc
+    join information_schema.key_column_usage kcu
+      on tc.constraint_name = kcu.constraint_name
+     and tc.table_schema = kcu.table_schema
+    where tc.table_schema = 'public'
+      and tc.table_name = 'orders'
+      and tc.constraint_type = 'FOREIGN KEY'
+      and kcu.column_name = 'user_id'
+  loop
+    execute format('alter table public.orders drop constraint if exists %I', fk.constraint_name);
+  end loop;
+
+  if users_id_type = 'uuid' and orders_user_type <> 'uuid' then
+    execute $sql$
+      alter table public.orders
+      alter column user_id type uuid
+      using case
+        when user_id is null then null
+        when user_id::text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+          then user_id::text::uuid
+        else null
+      end
+    $sql$;
+  elsif users_id_type in ('bigint', 'integer', 'smallint') and orders_user_type <> users_id_type then
+    execute format(
+      $sql$
+      alter table public.orders
+      alter column user_id type %s
+      using case
+        when user_id is null then null
+        when user_id::text ~ '^[0-9]+$' then (user_id::text)::%s
+        else null
+      end
+      $sql$,
+      users_id_type,
+      users_id_type
+    );
+  elsif users_id_type not in ('uuid', 'bigint', 'integer', 'smallint') and orders_user_type <> users_id_type then
+    execute format(
+      'alter table public.orders alter column user_id type %s using user_id::text::%s',
+      users_id_type,
+      users_id_type
+    );
+  end if;
+
+  execute 'alter table public.orders add constraint fk_user foreign key (user_id) references public.users(id) on delete set null';
+end $$;
 
 create unique index if not exists idx_orders_order_number_unique on orders(order_number);
 create index if not exists idx_orders_created_at_desc on orders(created_at desc);
@@ -84,6 +187,22 @@ end $$;
 
 create index if not exists idx_order_items_order_id on order_items(order_id);
 create index if not exists idx_order_items_product_id on order_items(product_id);
+
+-- Ensure PostgREST can resolve orders -> order_items relation even for older schemas.
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conrelid = 'public.order_items'::regclass
+      and contype = 'f'
+      and conname = 'order_items_order_id_fkey'
+  ) then
+    alter table public.order_items
+      add constraint order_items_order_id_fkey
+      foreign key (order_id) references public.orders(id) on delete cascade;
+  end if;
+end $$;
 
 create table if not exists inventory_logs (
   id uuid primary key default gen_random_uuid(),

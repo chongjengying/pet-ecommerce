@@ -1,194 +1,797 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
-import { useCart } from "@/context/CartContext";
-import { useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { type CartRowItem } from "@/components/cart/CartItemRow";
+
+type CartResponse = {
+  cart_id: string;
+  item_count: number;
+  subtotal: number;
+  items: CartRowItem[];
+};
+
+type ApiErrorPayload = {
+  error?: string;
+};
+
+type CheckoutSuccessOrder = {
+  id?: string | null;
+  order_number?: string | null;
+  subtotal?: number;
+  shipping_fee?: number;
+  tax_amount?: number;
+  total_amount?: number;
+  currency?: string;
+  shipping?: {
+    recipient_name?: string | null;
+    phone?: string | null;
+    address_line1?: string | null;
+    address_line2?: string | null;
+    city?: string | null;
+    state?: string | null;
+    postal_code?: string | null;
+    country?: string | null;
+  };
+  items?: Array<{
+    id: string | number;
+    name: string;
+    quantity: number;
+    unit_price: number;
+    line_total: number;
+  }>;
+};
+
+type CheckoutSuccessPayload = ApiErrorPayload & {
+  success?: boolean;
+  order?: CheckoutSuccessOrder;
+};
+
+type AddressRow = {
+  label?: string | null;
+  recipient_name?: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postal_code?: string | null;
+  country?: string | null;
+  is_default?: boolean;
+  is_default_shipping?: boolean;
+};
+
+type ProfileResponse = {
+  user?: {
+    addresses?: AddressRow[];
+  };
+};
+
+type CheckoutAddressForm = {
+  country: string;
+  firstName: string;
+  lastName: string;
+  address1: string;
+  address2: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  phone: string;
+};
+
+type CheckoutAddressPayload = {
+  country: string;
+  first_name: string;
+  last_name: string;
+  address_line1: string;
+  address_line2: string;
+  city: string;
+  state: string;
+  postal_code: string;
+  phone: string;
+};
+
+const CART_SNAPSHOT_KEY = "customer_cart_snapshot";
+
+function readToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("customer_jwt_token");
+}
+
+async function requestWithCustomerAuth(
+  input: RequestInfo | URL,
+  init: RequestInit = {}
+): Promise<Response> {
+  const token = readToken();
+  const headers = new Headers(init.headers ?? undefined);
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  let res = await fetch(input, {
+    ...init,
+    headers,
+    credentials: "same-origin",
+  });
+
+  if (res.status === 401 && headers.has("Authorization")) {
+    const retryHeaders = new Headers(headers);
+    retryHeaders.delete("Authorization");
+    res = await fetch(input, {
+      ...init,
+      headers: retryHeaders,
+      credentials: "same-origin",
+    });
+  }
+
+  return res;
+}
+
+function formatApiError(action: string, endpoint: string, status: number, payload?: ApiErrorPayload): string {
+  const apiMessage = String(payload?.error ?? "").trim();
+  if (apiMessage) {
+    return `[${endpoint}] ${action} failed (${status}): ${apiMessage}`;
+  }
+  return `[${endpoint}] ${action} failed (${status}).`;
+}
+
+function readEmailFromToken(): string {
+  const token = readToken();
+  if (!token) return "guest@checkout.com";
+  const parts = token.split(".");
+  if (parts.length !== 3) return "guest@checkout.com";
+  try {
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"))) as { email?: unknown };
+    return typeof payload.email === "string" && payload.email.trim() ? payload.email : "guest@checkout.com";
+  } catch {
+    return "guest@checkout.com";
+  }
+}
+
+function readCartSnapshot(): CartResponse | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(CART_SNAPSHOT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<CartResponse> & { items?: unknown };
+    return {
+      cart_id: String(parsed.cart_id ?? ""),
+      item_count: Number(parsed.item_count ?? 0),
+      subtotal: Number(parsed.subtotal ?? 0),
+      items: Array.isArray(parsed.items) ? (parsed.items as CartRowItem[]) : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+function clearCartSnapshot() {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(CART_SNAPSHOT_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
 
 export default function CartPage() {
-  const { items, removeFromCart, updateQuantity, cartCount, clearCart } = useCart();
+  const router = useRouter();
+  const [cart, setCart] = useState<CartResponse | null>(() => readCartSnapshot());
+  const [loading, setLoading] = useState(() => readCartSnapshot() == null);
   const [checkingOut, setCheckingOut] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [checkoutSuccess, setCheckoutSuccess] = useState(false);
-  const [checkoutSignInHint, setCheckoutSignInHint] = useState(false);
+  const [placedOrder, setPlacedOrder] = useState<CheckoutSuccessOrder | null>(null);
+  const [addressForm, setAddressForm] = useState<CheckoutAddressForm>({
+    country: "Malaysia",
+    firstName: "",
+    lastName: "",
+    address1: "",
+    address2: "",
+    city: "",
+    state: "",
+    postalCode: "",
+    phone: "",
+  });
+  const [sameBillingAsShipping, setSameBillingAsShipping] = useState(true);
+  const [billingForm, setBillingForm] = useState<CheckoutAddressForm>({
+    country: "Malaysia",
+    firstName: "",
+    lastName: "",
+    address1: "",
+    address2: "",
+    city: "",
+    state: "",
+    postalCode: "",
+    phone: "",
+  });
+
+  const itemCount = cart?.item_count ?? 0;
+  const subtotal = useMemo(() => cart?.subtotal ?? 0, [cart?.subtotal]);
+  const email = useMemo(() => readEmailFromToken(), []);
+
+  const fetchCart = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await requestWithCustomerAuth("/api/cart");
+      const data = (await res.json().catch(() => ({}))) as ApiErrorPayload & Partial<CartResponse>;
+      if (!res.ok) {
+        if (res.status === 401) {
+          router.push("/auth/login?next=/cart");
+          return;
+        }
+        setError(formatApiError("Load cart", "GET /api/cart", res.status, data));
+        setCart({ cart_id: "", item_count: 0, subtotal: 0, items: [] });
+        return;
+      }
+      setCart({
+        cart_id: String(data.cart_id ?? ""),
+        item_count: Number(data.item_count ?? 0),
+        subtotal: Number(data.subtotal ?? 0),
+        items: Array.isArray(data.items) ? (data.items as CartRowItem[]) : [],
+      });
+    } catch {
+      setError("[GET /api/cart] Could not reach server.");
+      setCart({ cart_id: "", item_count: 0, subtotal: 0, items: [] });
+    } finally {
+      setLoading(false);
+    }
+  }, [router]);
+
+  const fetchDefaultAddress = useCallback(async () => {
+    try {
+      const res = await requestWithCustomerAuth("/api/profile");
+      if (!res.ok) return;
+      const data = (await res.json().catch(() => ({}))) as ProfileResponse;
+      const addresses = Array.isArray(data.user?.addresses) ? data.user?.addresses : [];
+      const picked =
+        addresses.find((a) => a?.is_default_shipping ?? a?.is_default) ??
+        addresses.find((a) => a?.is_default) ??
+        addresses[0];
+      if (!picked) return;
+
+      const recipient = String(picked.recipient_name ?? "").trim();
+      const [first, ...rest] = recipient.split(/\s+/).filter(Boolean);
+      const last = rest.join(" ");
+      const nextAddress = {
+        country: String(picked.country ?? "Malaysia"),
+        firstName: first || "",
+        lastName: last || "",
+        address1: String(picked.address_line1 ?? ""),
+        address2: String(picked.address_line2 ?? ""),
+        city: String(picked.city ?? ""),
+        state: String(picked.state ?? ""),
+        postalCode: String(picked.postal_code ?? ""),
+        phone: "",
+      };
+      setAddressForm((prev) => ({
+        ...prev,
+        ...nextAddress,
+      }));
+      setBillingForm((prev) => ({ ...prev, ...nextAddress }));
+    } catch {
+      // Keep defaults if profile fetch fails.
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchCart();
+    void fetchDefaultAddress();
+  }, [fetchCart, fetchDefaultAddress]);
+
+  useEffect(() => {
+    router.prefetch("/profile/orders");
+  }, [router]);
+
+  useEffect(() => {
+    if (!checkoutSuccess) return;
+    const timeout = window.setTimeout(() => {
+      startTransition(() => {
+        router.push("/profile/orders");
+      });
+    }, 1800);
+    return () => window.clearTimeout(timeout);
+  }, [checkoutSuccess, router]);
 
   const handleCheckout = async () => {
     setCheckoutError(null);
-    setCheckoutSignInHint(false);
+    if (!cart || cart.items.length === 0) return;
+
     setCheckingOut(true);
     try {
-      const token = typeof window !== "undefined" ? localStorage.getItem("customer_jwt_token") : null;
-      const res = await fetch("/api/checkout", {
+      const recipientName = `${addressForm.firstName} ${addressForm.lastName}`.trim();
+      const profileRes = await requestWithCustomerAuth("/api/profile", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          address_label: "Home",
+          address_recipient_name: recipientName || null,
+          address_line1: addressForm.address1.trim(),
+          address_line2: addressForm.address2.trim() || null,
+          address_city: addressForm.city.trim(),
+          address_state: addressForm.state.trim(),
+          address_postal_code: addressForm.postalCode.trim(),
+          address_country: addressForm.country.trim(),
+        }),
+      });
+      if (!profileRes.ok) {
+        const profilePayload = (await profileRes.json().catch(() => ({}))) as ApiErrorPayload;
+        setCheckoutError(
+          formatApiError("Save shipping address", "PUT /api/profile", profileRes.status, profilePayload)
+        );
+        setCheckingOut(false);
+        return;
+      }
+
+      const toPayload = (form: CheckoutAddressForm): CheckoutAddressPayload => ({
+        country: form.country.trim(),
+        first_name: form.firstName.trim(),
+        last_name: form.lastName.trim(),
+        address_line1: form.address1.trim(),
+        address_line2: form.address2.trim(),
+        city: form.city.trim(),
+        state: form.state.trim(),
+        postal_code: form.postalCode.trim(),
+        phone: form.phone.trim(),
+      });
+      const shippingPayload = toPayload(addressForm);
+      const billingPayload = sameBillingAsShipping ? shippingPayload : toPayload(billingForm);
+
+      const res = await requestWithCustomerAuth("/api/checkout", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
-          items: items.map((i) => ({
-            id: i.id,
-            quantity: i.quantity,
-            name: i.name,
-            price: i.price,
+          items: cart.items.map((item) => ({
+            id: item.product_id,
+            quantity: item.quantity,
+            name: item.product.name,
+            price: item.price_at_time,
           })),
+          shipping_address: shippingPayload,
+          billing_address: billingPayload,
+          billing_same_as_shipping: sameBillingAsShipping,
         }),
       });
-      const data = await res.json().catch(() => ({}));
+      const data = (await res.json().catch(() => ({}))) as CheckoutSuccessPayload;
       if (!res.ok) {
-        setCheckoutError(data?.error ?? "Checkout failed");
-        setCheckoutSignInHint(!token || res.status === 401);
+        if (res.status === 401) {
+          router.push("/auth/login?next=/cart");
+          return;
+        }
+        if (res.status === 400 && String(data.error ?? "").toLowerCase().includes("shipping address")) {
+          router.push("/address-book");
+          return;
+        }
+        setCheckoutError(formatApiError("Checkout", "POST /api/checkout", res.status, data));
         return;
       }
-      clearCart();
+      const fallbackOrder: CheckoutSuccessOrder = {
+        order_number: null,
+        subtotal,
+        shipping_fee: 0,
+        tax_amount: 0,
+        total_amount: subtotal,
+        currency: "MYR",
+        shipping: {
+          recipient_name: recipientName || null,
+          phone: addressForm.phone.trim() || null,
+          address_line1: addressForm.address1.trim() || null,
+          address_line2: addressForm.address2.trim() || null,
+          city: addressForm.city.trim() || null,
+          state: addressForm.state.trim() || null,
+          postal_code: addressForm.postalCode.trim() || null,
+          country: addressForm.country.trim() || null,
+        },
+        items: cart.items.map((item) => ({
+          id: item.product_id,
+          name: item.product.name,
+          quantity: item.quantity,
+          unit_price: item.price_at_time,
+          line_total: item.price_at_time * item.quantity,
+        })),
+      };
+      setPlacedOrder(data.order ?? fallbackOrder);
       setCheckoutSuccess(true);
+      router.prefetch("/profile/orders");
+      setCart({ cart_id: cart.cart_id, item_count: 0, subtotal: 0, items: [] });
+      clearCartSnapshot();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("cart-changed"));
+      }
     } catch {
-      setCheckoutError("Checkout failed");
+      setCheckoutError("[POST /api/checkout] Could not reach server.");
     } finally {
       setCheckingOut(false);
     }
   };
 
-  const subtotal = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  if (loading) {
+    return (
+      <div className="bg-cream">
+        <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6">
+          <div className="rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm">
+            <p className="text-sm text-zinc-600">Loading cart...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-  if (cartCount === 0) {
+  if (checkoutSuccess) {
+    const order = placedOrder;
+    const shipping = order?.shipping;
+    const shippingLine = [
+      shipping?.address_line1,
+      shipping?.address_line2,
+      shipping?.city,
+      shipping?.state,
+      shipping?.postal_code,
+      shipping?.country,
+    ]
+      .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+      .join(", ");
+
+    return (
+      <div className="bg-cream">
+        <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6">
+          <div className="rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm">
+            <div className="text-center">
+              <h2 className="text-2xl font-bold text-zinc-900">Thank you!</h2>
+              <p className="mt-2 text-zinc-600">Your order has been placed successfully.</p>
+              {order?.order_number ? (
+                <p className="mt-2 text-sm font-semibold text-zinc-800">Order No: {order.order_number}</p>
+              ) : null}
+              <p className="mt-2 text-sm text-zinc-500">Redirecting to your orders...</p>
+            </div>
+
+            <div className="mt-8 rounded-xl border border-zinc-200 p-5">
+              <h3 className="text-lg font-semibold text-zinc-900">Current Order Summary</h3>
+              <div className="mt-4 space-y-3">
+                {order?.items?.map((item, index) => (
+                  <div key={`${item.id}-${index}`} className="flex items-start justify-between gap-3 border-b border-zinc-100 pb-2 last:border-b-0">
+                    <div>
+                      <p className="text-sm font-semibold text-zinc-900">{item.name}</p>
+                      <p className="text-xs text-zinc-600">Qty: {item.quantity}</p>
+                    </div>
+                    <p className="text-sm font-semibold text-zinc-900">RM{Number(item.line_total ?? 0).toFixed(2)}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4 space-y-1 border-t border-zinc-200 pt-3 text-sm text-zinc-700">
+                <div className="flex items-center justify-between">
+                  <span>Subtotal</span>
+                  <span>RM{Number(order?.subtotal ?? 0).toFixed(2)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Shipping</span>
+                  <span>RM{Number(order?.shipping_fee ?? 0).toFixed(2)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Tax</span>
+                  <span>RM{Number(order?.tax_amount ?? 0).toFixed(2)}</span>
+                </div>
+                <div className="flex items-center justify-between pt-1 text-base font-semibold text-zinc-900">
+                  <span>Total</span>
+                  <span>RM{Number(order?.total_amount ?? 0).toFixed(2)}</span>
+                </div>
+              </div>
+              <div className="mt-4 rounded-lg bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+                <p className="font-semibold text-zinc-900">Shipping Address</p>
+                <p className="mt-1">{shipping?.recipient_name || "Recipient not provided"}</p>
+                {shipping?.phone ? <p>{shipping.phone}</p> : null}
+                <p>{shippingLine || "Address not available"}</p>
+              </div>
+            </div>
+
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
+              <Link
+                href="/profile/orders"
+                className="inline-block rounded-xl bg-zinc-900 px-6 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800"
+              >
+                Check Orders
+              </Link>
+              <Link
+                href="/products"
+                className="inline-block rounded-xl border border-zinc-200 bg-white px-6 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-50"
+              >
+                Continue shopping
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (itemCount === 0) {
     return (
       <div className="bg-cream">
         <div className="mx-auto max-w-2xl px-4 py-16 sm:px-6">
-          {checkoutSuccess ? (
-            <div className="text-center">
-              <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-sage/20 text-sage">
-                <svg className="h-10 w-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-              </div>
-              <h2 className="mt-4 text-2xl font-bold text-umber">Thank you!</h2>
-              <p className="mt-2 text-umber/70">Your order has been placed and stock has been updated.</p>
+          <div className="rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm">
+            <h1 className="text-2xl font-bold text-zinc-900">Cart</h1>
+            <p className="mt-1 text-zinc-600">0 items</p>
+            {error ? (
+              <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>
+            ) : null}
+            <p className="mt-8 text-center text-lg font-semibold text-zinc-900">Your cart is empty</p>
+            <p className="mt-2 text-center text-sm text-zinc-600">Browse products and add your favorites.</p>
+            <div className="mt-8 text-center">
               <Link
                 href="/products"
-                className="mt-8 inline-block rounded-xl bg-terracotta px-6 py-3 text-sm font-semibold text-white hover:bg-terracotta/90"
+                className="inline-flex rounded-xl bg-zinc-900 px-6 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800"
               >
-                Continue Shopping
+                Continue shopping
               </Link>
             </div>
-          ) : (
-            <div className="rounded-2xl border border-amber-200/60 bg-white p-8 shadow-sm">
-              <h1 className="text-xl font-bold text-umber sm:text-2xl">Shopping Cart (0)</h1>
-              <div className="mt-10 flex flex-col items-center justify-center text-center">
-                <div className="flex h-24 w-24 items-center justify-center rounded-full bg-amber-50 text-umber/60">
-                  <svg className="h-14 w-14" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.25}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
-                  </svg>
-                </div>
-                <p className="mt-6 text-lg font-bold text-umber">Your cart is currently empty!</p>
-                <p className="mt-2 text-sm text-umber/70">You may check out all the available products and buy some in the shop.</p>
-                <Link
-                  href="/products"
-                  className="mt-8 w-full max-w-xs rounded-xl bg-umber px-6 py-3.5 text-center text-sm font-semibold text-white hover:bg-umber/90 sm:w-auto"
-                >
-                  Continue Shopping
-                </Link>
-              </div>
-            </div>
-          )}
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="bg-cream">
-      <div className="mx-auto max-w-4xl px-4 py-10 sm:px-6">
-        <h1 className="text-3xl font-bold tracking-tight text-umber">Cart</h1>
-        <p className="mt-1 text-umber/70">{cartCount} item{cartCount !== 1 ? "s" : ""}</p>
+    <div className="min-h-screen bg-cream pb-16">
+      <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
+        <div className="rounded-3xl border border-amber-200/60 bg-gradient-to-br from-amber-50 to-sage-light/20 p-6 shadow-sm sm:p-10">
+          <div className="flex flex-col gap-2 text-center sm:text-left">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-terracotta">Secure Checkout</p>
+            <h1 className="text-4xl font-bold tracking-tight text-umber sm:text-5xl">Checkout</h1>
+            <p className="text-sm text-umber/70">Review your details and place your order.</p>
+          </div>
 
-        <div className="mt-8 space-y-6">
-          {items.map((item) => (
-            <div
-              key={item.id}
-              className="flex flex-col gap-4 rounded-2xl border border-amber-200/60 bg-white p-4 shadow-sm sm:flex-row sm:items-center"
-            >
-              <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-xl bg-amber-50 sm:h-28 sm:w-28">
-                <Image
-                  src={item.image ?? item.image_url ?? `https://picsum.photos/200/200?random=${item.id}`}
-                  alt={item.name}
-                  fill
-                  unoptimized
-                  className="object-cover"
-                />
-              </div>
-              <div className="min-w-0 flex-1">
-                <h3 className="font-semibold text-umber">{item.name}</h3>
-                <p className="text-sm text-umber/70">RM{item.price.toFixed(2)} each</p>
-                <div className="mt-2 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => updateQuantity(String(item.id), item.quantity - 1)}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-amber-200 text-umber hover:bg-amber-50"
-                    aria-label={item.quantity === 1 ? "Remove item" : "Decrease quantity"}
-                  >
-                    −
-                  </button>
-                  <span className="w-8 text-center text-sm font-medium">{item.quantity}</span>
-                  <button
-                    type="button"
-                    onClick={() => updateQuantity(String(item.id), item.quantity + 1)}
-                    disabled={typeof item.stock === "number" && item.quantity >= item.stock}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-amber-200 text-umber hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
-                    aria-label="Increase quantity"
-                  >
-                    +
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => removeFromCart(String(item.id))}
-                    className="ml-2 text-sm text-red-600 hover:underline"
-                  >
-                    Remove
-                  </button>
+          <div className="mt-8 grid gap-6 lg:grid-cols-[1.45fr_0.9fr]">
+            <section className="space-y-6">
+              <div className="rounded-2xl border border-amber-200/70 bg-white p-5 shadow-sm sm:p-6">
+                <h2 className="text-xl font-semibold text-umber">Contact Information</h2>
+                <div className="mt-4 rounded-xl border border-amber-200 bg-cream px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-terracotta">Email address</p>
+                  <p className="mt-1 text-base font-medium text-umber">{email}</p>
                 </div>
               </div>
-              <div className="text-right font-semibold text-umber sm:text-lg">
-                RM{(item.price * item.quantity).toFixed(2)}
+
+              <div className="rounded-2xl border border-amber-200/70 bg-white p-5 shadow-sm sm:p-6">
+                <h2 className="text-xl font-semibold text-umber">Shipping Address</h2>
+                <div className="mt-4 space-y-3">
+                  <div className="rounded-xl border border-amber-200 bg-cream px-4 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-terracotta">Country/Region</p>
+                    <input
+                      value={addressForm.country}
+                      onChange={(event) => setAddressForm((prev) => ({ ...prev, country: event.target.value }))}
+                      className="mt-1 w-full bg-transparent text-base text-umber outline-none"
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-amber-200 bg-cream px-4 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-terracotta">First name</p>
+                      <input
+                        value={addressForm.firstName}
+                        onChange={(event) => setAddressForm((prev) => ({ ...prev, firstName: event.target.value }))}
+                        className="mt-1 w-full bg-transparent text-base text-umber outline-none"
+                      />
+                    </div>
+                    <div className="rounded-xl border border-amber-200 bg-cream px-4 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-terracotta">Last name</p>
+                      <input
+                        value={addressForm.lastName}
+                        onChange={(event) => setAddressForm((prev) => ({ ...prev, lastName: event.target.value }))}
+                        className="mt-1 w-full bg-transparent text-base text-umber outline-none"
+                      />
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-amber-200 bg-cream px-4 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-terracotta">Address</p>
+                    <input
+                      value={addressForm.address1}
+                      onChange={(event) => setAddressForm((prev) => ({ ...prev, address1: event.target.value }))}
+                      className="mt-1 w-full bg-transparent text-base text-umber outline-none"
+                    />
+                  </div>
+                  <div className="rounded-xl border border-amber-200 bg-cream px-4 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-terracotta">Apartment, suite, etc.</p>
+                    <input
+                      value={addressForm.address2}
+                      onChange={(event) => setAddressForm((prev) => ({ ...prev, address2: event.target.value }))}
+                      className="mt-1 w-full bg-transparent text-base text-umber outline-none"
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-amber-200 bg-cream px-4 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-terracotta">City</p>
+                      <input
+                        value={addressForm.city}
+                        onChange={(event) => setAddressForm((prev) => ({ ...prev, city: event.target.value }))}
+                        className="mt-1 w-full bg-transparent text-base text-umber outline-none"
+                      />
+                    </div>
+                    <div className="rounded-xl border border-amber-200 bg-cream px-4 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-terracotta">Postal code</p>
+                      <input
+                        value={addressForm.postalCode}
+                        onChange={(event) => setAddressForm((prev) => ({ ...prev, postalCode: event.target.value }))}
+                        className="mt-1 w-full bg-transparent text-base text-umber outline-none"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-amber-200 bg-cream px-4 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-terracotta">State/Region</p>
+                      <input
+                        value={addressForm.state}
+                        onChange={(event) => setAddressForm((prev) => ({ ...prev, state: event.target.value }))}
+                        className="mt-1 w-full bg-transparent text-base text-umber outline-none"
+                      />
+                    </div>
+                    <div className="rounded-xl border border-amber-200 bg-cream px-4 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-terracotta">Phone</p>
+                      <input
+                        value={addressForm.phone}
+                        onChange={(event) => setAddressForm((prev) => ({ ...prev, phone: event.target.value }))}
+                        className="mt-1 w-full bg-transparent text-base text-umber outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <label className="mt-4 inline-flex items-center gap-3 text-sm font-semibold text-umber">
+                  <input
+                    type="checkbox"
+                    checked={sameBillingAsShipping}
+                    onChange={(event) => setSameBillingAsShipping(event.target.checked)}
+                    className="h-4 w-4 rounded border-amber-300 text-terracotta focus:ring-terracotta"
+                  />
+                  Billing address is the same as shipping
+                </label>
               </div>
-            </div>
-          ))}
-        </div>
 
-        <div className="mt-10 rounded-2xl border border-amber-200/60 bg-white p-6">
-          <div className="flex justify-between text-lg font-semibold text-umber">
-            <span>Subtotal</span>
-            <span>RM{subtotal.toFixed(2)}</span>
-          </div>
-          <p className="mt-2 text-sm text-umber/60">Shipping and tax calculated at checkout.</p>
-          {checkoutError && (
-            <div className="mt-4 space-y-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700">
-              <p>{checkoutError}</p>
-              {checkoutSignInHint ? (
-                <p className="text-xs font-normal text-red-800/90">
-                  <Link href="/auth/login?next=/profile" className="font-semibold underline underline-offset-2">
-                    Sign in
-                  </Link>{" "}
-                  and save your shipping address on your profile before checking out.
-                </p>
+              {!sameBillingAsShipping ? (
+                <div className="rounded-2xl border border-amber-200/70 bg-white p-5 shadow-sm sm:p-6">
+                  <h2 className="text-xl font-semibold text-umber">Billing Address</h2>
+                  <div className="mt-4 space-y-3">
+                    <div className="rounded-xl border border-amber-200 bg-cream px-4 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-terracotta">Country/Region</p>
+                      <input
+                        value={billingForm.country}
+                        onChange={(event) => setBillingForm((prev) => ({ ...prev, country: event.target.value }))}
+                        className="mt-1 w-full bg-transparent text-base text-umber outline-none"
+                      />
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-xl border border-amber-200 bg-cream px-4 py-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-terracotta">First name</p>
+                        <input
+                          value={billingForm.firstName}
+                          onChange={(event) => setBillingForm((prev) => ({ ...prev, firstName: event.target.value }))}
+                          className="mt-1 w-full bg-transparent text-base text-umber outline-none"
+                        />
+                      </div>
+                      <div className="rounded-xl border border-amber-200 bg-cream px-4 py-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-terracotta">Last name</p>
+                        <input
+                          value={billingForm.lastName}
+                          onChange={(event) => setBillingForm((prev) => ({ ...prev, lastName: event.target.value }))}
+                          className="mt-1 w-full bg-transparent text-base text-umber outline-none"
+                        />
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-amber-200 bg-cream px-4 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-terracotta">Address</p>
+                      <input
+                        value={billingForm.address1}
+                        onChange={(event) => setBillingForm((prev) => ({ ...prev, address1: event.target.value }))}
+                        className="mt-1 w-full bg-transparent text-base text-umber outline-none"
+                      />
+                    </div>
+                    <div className="rounded-xl border border-amber-200 bg-cream px-4 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-terracotta">Apartment, suite, etc.</p>
+                      <input
+                        value={billingForm.address2}
+                        onChange={(event) => setBillingForm((prev) => ({ ...prev, address2: event.target.value }))}
+                        className="mt-1 w-full bg-transparent text-base text-umber outline-none"
+                      />
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-xl border border-amber-200 bg-cream px-4 py-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-terracotta">City</p>
+                        <input
+                          value={billingForm.city}
+                          onChange={(event) => setBillingForm((prev) => ({ ...prev, city: event.target.value }))}
+                          className="mt-1 w-full bg-transparent text-base text-umber outline-none"
+                        />
+                      </div>
+                      <div className="rounded-xl border border-amber-200 bg-cream px-4 py-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-terracotta">Postal code</p>
+                        <input
+                          value={billingForm.postalCode}
+                          onChange={(event) => setBillingForm((prev) => ({ ...prev, postalCode: event.target.value }))}
+                          className="mt-1 w-full bg-transparent text-base text-umber outline-none"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-xl border border-amber-200 bg-cream px-4 py-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-terracotta">State/Region</p>
+                        <input
+                          value={billingForm.state}
+                          onChange={(event) => setBillingForm((prev) => ({ ...prev, state: event.target.value }))}
+                          className="mt-1 w-full bg-transparent text-base text-umber outline-none"
+                        />
+                      </div>
+                      <div className="rounded-xl border border-amber-200 bg-cream px-4 py-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-terracotta">Phone</p>
+                        <input
+                          value={billingForm.phone}
+                          onChange={(event) => setBillingForm((prev) => ({ ...prev, phone: event.target.value }))}
+                          className="mt-1 w-full bg-transparent text-base text-umber outline-none"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
               ) : null}
-            </div>
-          )}
-          <button
-            type="button"
-            onClick={handleCheckout}
-            disabled={checkingOut}
-            className="mt-6 w-full rounded-xl bg-terracotta py-3.5 text-base font-semibold text-white shadow-md hover:bg-terracotta/90 disabled:opacity-70 sm:w-auto sm:px-12"
-          >
-            {checkingOut ? "Processing…" : "Proceed to checkout"}
-          </button>
-        </div>
 
-        <Link
-          href="/products"
-          className="mt-6 inline-block text-sm font-medium text-terracotta hover:underline"
-        >
-          ← Continue shopping
-        </Link>
+              <div className="rounded-2xl border border-amber-200/70 bg-white p-5 shadow-sm sm:p-6">
+                <h2 className="text-xl font-semibold text-umber">Payment</h2>
+                <div className="mt-4 rounded-xl border border-terracotta/40 bg-terracotta/95 p-4 text-white">
+                  <p className="text-sm font-semibold uppercase tracking-[0.14em] text-white/90">Card details</p>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-[1.3fr_0.7fr_0.7fr]">
+                    <div className="rounded-lg border border-white/50 px-3 py-2.5 text-sm font-semibold">1234 1234 1234 1234</div>
+                    <div className="rounded-lg border border-white/50 px-3 py-2.5 text-sm font-semibold">MM/YY</div>
+                    <div className="rounded-lg border border-white/50 px-3 py-2.5 text-sm font-semibold">CVC</div>
+                  </div>
+                  <p className="mt-3 text-xs text-white/90">Secure payment placeholder. Your backend checkout flow remains unchanged.</p>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3 border-t border-amber-200/80 pt-5 sm:flex-row sm:items-center sm:justify-between">
+                <Link href="/products" className="text-sm font-semibold text-umber/80 transition hover:text-umber hover:underline">
+                  Return to shopping
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => void handleCheckout()}
+                  disabled={checkingOut}
+                  className="w-full rounded-xl bg-terracotta px-8 py-3 text-sm font-semibold uppercase tracking-wide text-white transition hover:bg-terracotta/90 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                >
+                  {checkingOut ? "Processing..." : "Place Order"}
+                </button>
+              </div>
+            </section>
+
+            <aside className="h-fit rounded-2xl border border-amber-200/70 bg-white p-5 shadow-sm sm:p-6 lg:sticky lg:top-24">
+              <h3 className="text-2xl font-semibold text-umber">Order Summary</h3>
+              <p className="mt-1 text-sm text-umber/70">{itemCount} items</p>
+              <div className="mt-5 space-y-4">
+                {cart?.items.map((item, index) => (
+                  <div key={`${item.id}-${index}`} className="border-b border-amber-100 pb-3 last:border-b-0">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="text-sm font-semibold text-umber">
+                        {index + 1}. {item.product.name}
+                      </p>
+                      <p className="text-sm font-semibold text-umber">RM{(item.price_at_time * item.quantity).toFixed(2)}</p>
+                    </div>
+                    <p className="mt-1 text-xs text-umber/70">Qty: {item.quantity}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-5 flex items-center justify-between border-t border-amber-200 pt-4 text-base font-semibold text-umber">
+                <span>Subtotal</span>
+                <span>RM{subtotal.toFixed(2)}</span>
+              </div>
+              <p className="mt-2 text-xs text-umber/70">Shipping and tax calculated at checkout.</p>
+              {error ? (
+                <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+              ) : null}
+              {checkoutError ? (
+                <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{checkoutError}</p>
+              ) : null}
+            </aside>
+          </div>
+        </div>
       </div>
     </div>
   );

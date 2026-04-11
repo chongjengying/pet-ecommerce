@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase";
+import { getSupabaseServerClient } from "@/lib/supabaseServer";
 
 export interface OrderItemSnapshot {
   id: string | number;
@@ -27,16 +27,29 @@ export interface OrderRow {
 export async function createOrder(
   items: OrderItemSnapshot[],
   options?: {
-    user_id?: string | null;
+    user_id?: string | number | null;
     status?: string;
+    payment_status?: string;
+    shipping_method?: string;
+    tracking_number?: string | null;
     subtotal?: number;
     shipping_fee?: number;
     tax_amount?: number;
+    discount?: number;
     currency?: string;
     notes?: string | null;
+    shipping_name?: string | null;
+    shipping_phone?: string | null;
+    shipping_address_line_1?: string | null;
+    shipping_address_line_2?: string | null;
+    shipping_city?: string | null;
+    shipping_state?: string | null;
+    shipping_postal_code?: string | null;
+    shipping_country?: string | null;
     metadata?: Record<string, unknown> | null;
   }
 ): Promise<OrderRow> {
+  const supabase = getSupabaseServerClient();
   const computedSubtotal = items.reduce(
     (sum, i) => sum + (Number(i.price) || 0) * (i.quantity || 0),
     0
@@ -50,12 +63,24 @@ export async function createOrder(
     subtotal: number;
     shipping_fee: number;
     tax_amount: number;
+    discount?: number;
     total_amount: number;
     currency: string;
     status: string;
+    payment_status?: string;
+    shipping_method?: string;
+    tracking_number?: string | null;
     notes?: string | null;
+    shipping_name?: string | null;
+    shipping_phone?: string | null;
+    shipping_address_line_1?: string | null;
+    shipping_address_line_2?: string | null;
+    shipping_city?: string | null;
+    shipping_state?: string | null;
+    shipping_postal_code?: string | null;
+    shipping_country?: string | null;
     metadata?: Record<string, unknown> | null;
-    user_id?: string;
+    user_id?: string | number;
   } = {
     subtotal,
     shipping_fee: shippingFee,
@@ -64,11 +89,47 @@ export async function createOrder(
     currency: options?.currency ?? "MYR",
     status: options?.status ?? "completed",
   };
+  if (options?.payment_status != null) {
+    orderPayload.payment_status = options.payment_status;
+  }
+  if (options?.shipping_method != null) {
+    orderPayload.shipping_method = options.shipping_method;
+  }
+  if (options?.tracking_number !== undefined) {
+    orderPayload.tracking_number = options.tracking_number;
+  }
   if (options?.user_id != null && options.user_id !== "") {
     orderPayload.user_id = options.user_id;
   }
+  if (options?.discount != null && Number.isFinite(Number(options.discount))) {
+    orderPayload.discount = Number(options.discount);
+  }
   if (options?.notes != null) {
     orderPayload.notes = options.notes;
+  }
+  if (options?.shipping_name !== undefined) {
+    orderPayload.shipping_name = options.shipping_name;
+  }
+  if (options?.shipping_phone !== undefined) {
+    orderPayload.shipping_phone = options.shipping_phone;
+  }
+  if (options?.shipping_address_line_1 !== undefined) {
+    orderPayload.shipping_address_line_1 = options.shipping_address_line_1;
+  }
+  if (options?.shipping_address_line_2 !== undefined) {
+    orderPayload.shipping_address_line_2 = options.shipping_address_line_2;
+  }
+  if (options?.shipping_city !== undefined) {
+    orderPayload.shipping_city = options.shipping_city;
+  }
+  if (options?.shipping_state !== undefined) {
+    orderPayload.shipping_state = options.shipping_state;
+  }
+  if (options?.shipping_postal_code !== undefined) {
+    orderPayload.shipping_postal_code = options.shipping_postal_code;
+  }
+  if (options?.shipping_country !== undefined) {
+    orderPayload.shipping_country = options.shipping_country;
   }
   if (options?.metadata != null) {
     orderPayload.metadata = options.metadata;
@@ -192,6 +253,7 @@ function isMissingColumnError(err: unknown): boolean {
 
 /** Fetch orders with line items from order_items. */
 export async function getOrders(): Promise<OrderRow[]> {
+  const supabase = getSupabaseServerClient();
   const selectAttempts = [
     // New schema (preferred)
     "id, order_number, created_at, status, subtotal, shipping_fee, tax_amount, total_amount, currency, order_items(product_id, product_name, unit_price, quantity)",
@@ -211,7 +273,7 @@ export async function getOrders(): Promise<OrderRow[]> {
       .order("created_at", { ascending: false });
 
     if (!error) {
-      return await mapRowsToOrders((data ?? []) as unknown as OrderSelectRow[]);
+      return await mapRowsToOrders(supabase, (data ?? []) as unknown as OrderSelectRow[]);
     }
 
     lastError = error;
@@ -223,7 +285,10 @@ export async function getOrders(): Promise<OrderRow[]> {
   throw toError(lastError);
 }
 
-async function mapRowsToOrders(rows: OrderSelectRow[]): Promise<OrderRow[]> {
+async function mapRowsToOrders(
+  supabase: ReturnType<typeof getSupabaseServerClient>,
+  rows: OrderSelectRow[]
+): Promise<OrderRow[]> {
   const orderIds = rows.map((row) => row.id);
   const productIds = new Set<number>();
   for (const order of rows) {

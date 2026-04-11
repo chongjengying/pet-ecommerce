@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import OrderStatusClient from "@/components/orders/OrderStatusClient";
 import { CUSTOMER_SESSION_COOKIE, verifyCustomerJwt } from "@/lib/customerJwt";
-import { loadLatestCustomerOrderStatus } from "@/lib/customerOrders";
+import { loadCustomerOrderStatuses } from "@/lib/customerOrders";
 
 export const metadata = {
   title: "Order Status - PAWLUXE",
@@ -18,16 +18,23 @@ export default async function ProfileOrdersPage() {
     redirect("/auth/login?next=/profile/orders");
   }
 
-  const order = await loadLatestCustomerOrderStatus({
+  const orders = await loadCustomerOrderStatuses({
     sub: session.sub,
     username: session.username,
     email: session.email,
-  }).catch(() => null);
+  }).catch((error: unknown) => {
+    console.error("[profile/orders] Failed to load customer orders", {
+      sub: session.sub,
+      email: session.email,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  });
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-[linear-gradient(180deg,rgba(251,247,240,1),rgba(255,252,246,0.96),rgba(248,242,231,0.72))] px-4 py-10 sm:px-6 lg:px-8 lg:py-14">
       <div className="mx-auto max-w-7xl">
-        <OrderStatusClient order={order} />
+        <OrderStatusClient orders={orders} />
       </div>
     </div>
   );

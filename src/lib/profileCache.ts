@@ -11,6 +11,8 @@ export type ProfileAddress = {
   postal_code: string | null;
   country: string;
   is_default: boolean;
+  is_default_shipping?: boolean;
+  is_default_billing?: boolean;
 };
 
 export type CachedProfileUser = {

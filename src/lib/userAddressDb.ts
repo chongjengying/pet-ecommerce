@@ -2,7 +2,7 @@ import { getSupabaseServerClient } from "@/lib/supabaseServer";
 import { userIdForDbQuery } from "@/lib/userIdDb";
 
 /**
- * Supabase table for shipping rows (linked to `users` and usually `profiles`).
+ * Supabase table for shipping rows owned by `users`.
  * Set `SUPABASE_ADDRESSES_TABLE=addresses` in `.env.local` if your table is not `user_addresses`.
  */
 export function addressesTable(): string {
@@ -26,6 +26,8 @@ export type UserAddressRow = {
   postal_code: string | null;
   country: string;
   is_default: boolean;
+  is_default_shipping?: boolean;
+  is_default_billing?: boolean;
 };
 
 export function getDefaultUserAddress(addresses: UserAddressRow[]): UserAddressRow | null {
@@ -78,19 +80,20 @@ function isMissingColumn(error: unknown, column: string): boolean {
   );
 }
 
+function logAddressQueryIssue(context: string, error: unknown): void {
+  const message = String((error as { message?: string })?.message ?? "Unknown address query error");
+  console.error(`[userAddressDb] ${context}: ${message}`);
+}
+
 export function mapUserAddressRow(r: Record<string, unknown>): UserAddressRow {
   const addressLine1 =
     typeof r.address_line1 === "string"
       ? r.address_line1
-      : typeof r.line1 === "string"
-        ? r.line1
-        : "";
+      : "";
   const addressLine2 =
     typeof r.address_line2 === "string"
       ? r.address_line2
-      : typeof r.line2 === "string"
-        ? r.line2
-        : null;
+      : null;
   return {
     id: String(r.id ?? ""),
     label: typeof r.label === "string" ? r.label : "Home",
@@ -101,7 +104,16 @@ export function mapUserAddressRow(r: Record<string, unknown>): UserAddressRow {
     state: typeof r.state === "string" ? r.state : null,
     postal_code: typeof r.postal_code === "string" ? r.postal_code : null,
     country: typeof r.country === "string" ? r.country : "MY",
-    is_default: Boolean(r.is_default),
+    is_default:
+      typeof r.is_default === "boolean"
+        ? r.is_default
+        : typeof r.is_default_shipping === "boolean"
+          ? r.is_default_shipping
+          : false,
+    is_default_shipping:
+      typeof r.is_default_shipping === "boolean" ? r.is_default_shipping : Boolean(r.is_default),
+    is_default_billing:
+      typeof r.is_default_billing === "boolean" ? r.is_default_billing : Boolean(r.is_default),
   };
 }
 
@@ -109,28 +121,48 @@ async function selectAddressesByUserId(
   supabase: Supabase,
   uid: string | number
 ): Promise<{ data: unknown[] | null; error: DbError }> {
-  const { data, error } = await supabase
+  const withCreatedAt = await supabase
     .from(addressesTable())
     .select(USER_ADDRESS_SELECT_FIELDS)
     .eq("user_id", uid)
     .order("created_at", { ascending: true });
 
-  if (error) return { data: null, error };
-  return { data: Array.isArray(data) ? data : [], error: null };
-}
+  if (!withCreatedAt.error) {
+    return {
+      data: Array.isArray(withCreatedAt.data) ? withCreatedAt.data : [],
+      error: null,
+    };
+  }
 
-async function selectAddressesByProfileId(
-  supabase: Supabase,
-  profileId: string
-): Promise<{ data: unknown[] | null; error: DbError }> {
-  const { data, error } = await supabase
+  if (!isMissingColumn(withCreatedAt.error, "created_at")) {
+    return { data: null, error: withCreatedAt.error };
+  }
+
+  const withoutCreatedAt = await supabase
     .from(addressesTable())
     .select(USER_ADDRESS_SELECT_FIELDS)
-    .eq("profile_id", profileId)
-    .order("created_at", { ascending: true });
+    .eq("user_id", uid)
+    .order("id", { ascending: true });
 
-  if (error) return { data: null, error };
-  return { data: Array.isArray(data) ? data : [], error: null };
+  if (!withoutCreatedAt.error) {
+    return {
+      data: Array.isArray(withoutCreatedAt.data) ? withoutCreatedAt.data : [],
+      error: null,
+    };
+  }
+
+  if (isMissingColumn(withoutCreatedAt.error, "id")) {
+    const unordered = await supabase.from(addressesTable()).select(USER_ADDRESS_SELECT_FIELDS).eq("user_id", uid);
+    if (!unordered.error) {
+      return {
+        data: Array.isArray(unordered.data) ? unordered.data : [],
+        error: null,
+      };
+    }
+    return { data: null, error: unordered.error };
+  }
+
+  return { data: null, error: withoutCreatedAt.error };
 }
 
 export async function fetchUserAddresses(supabase: Supabase, userId: string): Promise<UserAddressRow[]> {
@@ -144,19 +176,8 @@ export async function fetchUserAddresses(supabase: Supabase, userId: string): Pr
     return [];
   }
   if (isMissingUserAddressesTable(byUser.error)) return [];
-  if (!isMissingColumn(byUser.error, "user_id")) return [];
-
-  const { data: prof } = await supabase.from("profiles").select("id").eq("user_id", uid).maybeSingle();
-  const profileId = prof?.id != null ? String(prof.id) : null;
-  if (!profileId) return [];
-
-  const byProfile = await selectAddressesByProfileId(supabase, profileId);
-  if (byProfile.error) {
-    if (isMissingUserAddressesTable(byProfile.error)) return [];
-    return [];
-  }
-  const rows = byProfile.data ?? [];
-  return rows.map((row) => mapUserAddressRow(row as Record<string, unknown>));
+  logAddressQueryIssue(`Could not load addresses for user_id=${String(uid)}`, byUser.error);
+  return [];
 }
 
 export type DefaultUserAddressPayload = {
@@ -214,19 +235,18 @@ function asLiteRows(data: unknown): AddressLiteRow[] {
   return Array.isArray(data) ? (data as AddressLiteRow[]) : [];
 }
 
-async function selectAddressRowsForUpsert(
+async function selectAddressRowsForUser(
   supabase: Supabase,
-  key: "user_id" | "profile_id",
-  value: string | number
+  uid: string | number
 ): Promise<{ rows: AddressLiteRow[]; error: DbError }> {
-  const withDefault = await supabase.from(addressesTable()).select("id,is_default").eq(key, value);
+  const withDefault = await supabase.from(addressesTable()).select("id,is_default").eq("user_id", uid);
   if (!withDefault.error) {
     return { rows: asLiteRows(withDefault.data), error: null };
   }
   if (!isMissingColumn(withDefault.error, "is_default")) {
     return { rows: [], error: withDefault.error };
   }
-  const noDefault = await supabase.from(addressesTable()).select("id").eq(key, value);
+  const noDefault = await supabase.from(addressesTable()).select("id").eq("user_id", uid);
   if (noDefault.error) return { rows: [], error: noDefault.error };
   return { rows: asLiteRows(noDefault.data), error: null };
 }
@@ -236,7 +256,7 @@ async function upsertDefaultByUserIdOnly(
   uid: string | number,
   payload: DefaultUserAddressPayload
 ): Promise<{ error: { message?: string } | null }> {
-  const { rows: existingRows, error: listError } = await selectAddressRowsForUpsert(supabase, "user_id", uid);
+  const { rows: existingRows, error: listError } = await selectAddressRowsForUser(supabase, uid);
 
   if (listError) {
     if (isMissingUserAddressesTable(listError)) return { error: missingAddressesTableError() };
@@ -277,84 +297,5 @@ export async function upsertDefaultUserAddress(
   payload: DefaultUserAddressPayload
 ): Promise<{ error: { message?: string } | null }> {
   const uid = userIdForDbQuery(userId);
-
-  const { data: prof, error: profErr } = await supabase.from("profiles").select("id").eq("user_id", uid).maybeSingle();
-  if (profErr) {
-    return { error: profErr };
-  }
-  const profileId = prof?.id != null ? String(prof.id) : null;
-  if (!profileId) {
-    return upsertDefaultByUserIdOnly(supabase, uid, payload);
-  }
-
-  // Best-effort linking: if legacy rows exist without profile_id, backfill them.
-  const linkAttempt = await supabase
-    .from(addressesTable())
-    .update({ profile_id: profileId })
-    .eq("user_id", uid)
-    .is("profile_id", null);
-  if (linkAttempt.error && !isMissingColumn(linkAttempt.error, "profile_id")) {
-    if (isMissingUserAddressesTable(linkAttempt.error)) {
-      return { error: missingAddressesTableError() };
-    }
-    return { error: linkAttempt.error };
-  }
-
-  const { rows: existingRows, error: listError } = await selectAddressRowsForUpsert(
-    supabase,
-    "profile_id",
-    profileId
-  );
-
-  if (listError) {
-    if (isMissingUserAddressesTable(listError)) {
-      return { error: missingAddressesTableError() };
-    }
-    if (isMissingColumn(listError, "profile_id")) {
-      return upsertDefaultByUserIdOnly(supabase, uid, payload);
-    }
-    return { error: listError };
-  }
-
-  const rows = Array.isArray(existingRows) ? existingRows : [];
-  const defaultRow = rows.find((r: { is_default?: boolean }) => r.is_default) ?? rows[0];
-  const rawId = defaultRow != null ? (defaultRow as { id?: unknown }).id : null;
-  const id = rawId != null && String(rawId).length > 0 ? String(rawId) : null;
-
-  if (id) {
-    const { error: u1 } = await supabase
-      .from(addressesTable())
-      .update({ is_default: false })
-      .eq("profile_id", profileId)
-      .neq("id", id);
-    if (u1) {
-      if (isMissingColumn(u1, "is_default")) {
-        // Legacy schemas may not have is_default; continue without resetting other rows.
-      } else if (isMissingColumn(u1, "profile_id")) {
-        return upsertDefaultByUserIdOnly(supabase, uid, payload);
-      } else {
-        return { error: u1 };
-      }
-    }
-
-    const u2 = await updateByIdWithMissingColumnFallback(supabase, id, {
-      ...payload,
-      is_default: true,
-    });
-    return { error: u2 };
-  }
-
-  const insertRow: Record<string, unknown> = {
-    user_id: uid,
-    profile_id: profileId,
-    ...payload,
-    is_default: true,
-  };
-  const ins = await insertWithMissingColumnFallback(supabase, insertRow);
-  if (ins && isMissingColumn(ins, "profile_id")) {
-    delete insertRow.profile_id;
-    const retry = await insertWithMissingColumnFallback(supabase, insertRow);
-    return { error: retry };
-  }
-  return { error: ins };
+  return upsertDefaultByUserIdOnly(supabase, uid, payload);
 }

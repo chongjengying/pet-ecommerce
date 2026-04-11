@@ -67,7 +67,7 @@ export default function CustomerSignupForm() {
         window.dispatchEvent(new Event("customer-auth-changed"));
       }
 
-      setMessage("Account created. Add your shipping address on your profile next.");
+      setMessage("Account created. Add your shipping address in Address Book next.");
       router.replace("/profile?setup=1");
       router.refresh();
     } catch {
@@ -83,7 +83,7 @@ export default function CustomerSignupForm() {
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sage">Pawluxe Customer</p>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight text-umber">Create account</h1>
         <p className="mt-2 text-sm text-umber/70">
-          View order history and check out after you add a shipping address on your profile.
+          View order history and check out after you add a shipping address in Address Book.
         </p>
       </div>
 

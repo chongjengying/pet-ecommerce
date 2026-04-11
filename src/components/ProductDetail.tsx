@@ -57,9 +57,9 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
     return s && s.length > 0 ? s : "";
   }, [product.size_label, product.size]);
 
-  const handleAddToCart = () => {
+  const handleAddToCart = async () => {
     if (outOfStock || effectiveQty <= 0) return;
-    addToCart(
+    const ok = await addToCart(
       {
         ...product,
         image: resolveProductImageUrl(product),
@@ -67,6 +67,7 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
       },
       effectiveQty
     );
+    if (!ok) return;
     setAdded(true);
     setTimeout(() => setAdded(false), 2000);
   };
@@ -239,7 +240,7 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
 
               <button
                 type="button"
-                onClick={handleAddToCart}
+                onClick={() => void handleAddToCart()}
                 disabled={outOfStock || (maxQty !== undefined && quantity > maxQty)}
                 className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-terracotta py-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-terracotta/92 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sage disabled:cursor-not-allowed disabled:bg-umber/35 disabled:text-white/85"
               >

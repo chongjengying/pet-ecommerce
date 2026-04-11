@@ -156,10 +156,12 @@ export async function getCustomerFromRequest(request: Request): Promise<Customer
 
   const cookieStore = await cookies();
   const cookieToken = cookieStore.get(CUSTOMER_SESSION_COOKIE)?.value ?? "";
-  const token = bearer || cookieToken;
-  if (!token) return null;
+  if (!bearer && !cookieToken) return null;
 
-  const payload = await verifyCustomerJwt(token);
+  let payload = bearer ? await verifyCustomerJwt(bearer) : null;
+  if (!payload && cookieToken) {
+    payload = await verifyCustomerJwt(cookieToken);
+  }
   if (!payload) return null;
   if (isAdminRole(payload.role)) return null;
   return payload;
