@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import ProductDetail from "@/components/ProductDetail";
-import { getProductById, getProducts, getRelatedProducts } from "@/services/productService";
+import { getProductById, getProducts } from "@/services/productService";
 
 export async function generateStaticParams() {
   const products = await getProducts().catch(() => []);
@@ -10,10 +10,7 @@ export async function generateStaticParams() {
 
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [product, related] = await Promise.all([
-    getProductById(id).catch(() => null),
-    getRelatedProducts(id, 4).catch(() => []),
-  ]);
+  const product = await getProductById(id).catch(() => null);
   if (!product) return notFound();
-  return <ProductDetail product={product} relatedProducts={related} />;
+  return <ProductDetail product={product} relatedProducts={[]} />;
 }

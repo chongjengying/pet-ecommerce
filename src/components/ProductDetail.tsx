@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { Product } from "@/types";
 import { useCart } from "@/context/CartContext";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { resolveProductImageUrl } from "@/lib/productImage";
 import ProductCard from "@/components/ProductCard";
 
@@ -24,6 +24,7 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
   const [quantity, setQuantity] = useState(1);
   const [added, setAdded] = useState(false);
   const [zoomOpen, setZoomOpen] = useState(false);
+  const [related, setRelated] = useState<Product[]>(relatedProducts);
 
   const gallery = useMemo(() => {
     const g = product.gallery_images;
@@ -33,6 +34,29 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
 
   const [activeIndex, setActiveIndex] = useState(0);
   const mainImageUrl = gallery[Math.min(activeIndex, gallery.length - 1)] ?? resolveProductImageUrl(product);
+  const displayRelated = relatedProducts.length > 0 ? relatedProducts : related;
+
+  useEffect(() => {
+    if (relatedProducts.length > 0) return;
+    let active = true;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/products/${encodeURIComponent(String(product.id))}/related`, {
+          method: "GET",
+          cache: "no-store",
+        });
+        if (!response.ok) return;
+        const data = (await response.json().catch(() => ({}))) as { products?: Product[] };
+        if (!active || !Array.isArray(data.products)) return;
+        setRelated(data.products);
+      } catch {
+        // keep UI usable even when related products fail to load
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [product.id, relatedProducts]);
 
   const stock = getStock(product);
   const inCartQty = items.find((i) => String(i.id) === String(product.id))?.quantity ?? 0;
@@ -121,7 +145,6 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
                   src={mainImageUrl}
                   alt={product.name}
                   fill
-                  unoptimized
                   className="object-contain p-4"
                   sizes="(max-width: 1024px) 100vw, 50vw"
                   priority
@@ -164,7 +187,7 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
                     }`}
                     aria-label={`View image ${i + 1}`}
                   >
-                    <Image src={url} alt="" fill unoptimized className="object-cover" sizes="80px" />
+                    <Image src={url} alt="" fill className="object-cover" sizes="80px" />
                   </button>
                 ))}
               </div>
@@ -360,11 +383,11 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
         </div>
 
         {/* You may also like */}
-        {relatedProducts.length > 0 ? (
+        {displayRelated.length > 0 ? (
           <section className="mt-16 border-t border-amber-200/80 pt-12">
             <h2 className="text-center text-xl font-bold text-umber sm:text-2xl">You may also like</h2>
             <ul className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-              {relatedProducts.map((p) => (
+              {displayRelated.map((p) => (
                 <li key={p.id}>
                   <ProductCard product={p} />
                 </li>
@@ -391,7 +414,7 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
             Close
           </button>
           <div className="relative h-[min(85vh,800px)] w-full max-w-4xl" onClick={(e) => e.stopPropagation()}>
-            <Image src={mainImageUrl} alt={product.name} fill unoptimized className="object-contain" sizes="100vw" />
+            <Image src={mainImageUrl} alt={product.name} fill className="object-contain" sizes="100vw" />
           </div>
         </div>
       ) : null}

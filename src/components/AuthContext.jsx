@@ -33,7 +33,7 @@ export function AuthProvider({ children }) {
         fullName: payload.user.full_name,
       });
       setToken(currentToken);
-    } catch (err) {
+    } catch {
       localStorage.removeItem(TOKEN_STORAGE_KEY);
       setUser(null);
       setToken(null);

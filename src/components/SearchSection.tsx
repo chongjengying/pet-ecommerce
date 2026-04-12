@@ -11,6 +11,7 @@ interface SearchSectionProps {
 
 type SortKey = "popular" | "newest" | "price";
 type PriceFilter = "all" | "under-50" | "50-100" | "100-200" | "200-plus";
+type AvailabilityFilter = "all" | "in-stock" | "out-of-stock" | "new-arrival";
 
 function normalizeText(value: string | null | undefined): string {
   return String(value ?? "").trim().toLowerCase();
@@ -24,12 +25,25 @@ function inPriceRange(price: number, range: PriceFilter): boolean {
   return true;
 }
 
+function isOutOfStock(product: Product): boolean {
+  const stockNum = Number(product.stock);
+  return Number.isFinite(stockNum) && stockNum <= 0;
+}
+
+function isNewArrival(product: Product, newestIds: Set<string>): boolean {
+  const badge = normalizeText(product.delivery_badge_text);
+  if (badge.includes("new")) return true;
+  return newestIds.has(String(product.id));
+}
+
 function filterProducts(
   products: Product[],
   keyword: string,
   selectedSize: string,
   selectedColor: string,
-  priceFilter: PriceFilter
+  priceFilter: PriceFilter,
+  availabilityFilter: AvailabilityFilter,
+  newestIds: Set<string>
 ): Product[] {
   const k = keyword.trim().toLowerCase();
   const size = normalizeText(selectedSize);
@@ -46,8 +60,15 @@ function filterProducts(
     const matchSize = !size || sizeLabel === size;
     const matchColor = !color || colorLabel === color;
     const matchPrice = inPriceRange(price, priceFilter);
+    const outOfStock = isOutOfStock(p);
+    const newArrival = isNewArrival(p, newestIds);
+    const matchAvailability =
+      availabilityFilter === "all" ||
+      (availabilityFilter === "in-stock" && !outOfStock) ||
+      (availabilityFilter === "out-of-stock" && outOfStock) ||
+      (availabilityFilter === "new-arrival" && newArrival);
 
-    return matchKeyword && matchSize && matchColor && matchPrice;
+    return matchKeyword && matchSize && matchColor && matchPrice && matchAvailability;
   });
 }
 
@@ -77,6 +98,7 @@ export default function SearchSection({ allProducts }: SearchSectionProps) {
   const [selectedSize, setSelectedSize] = useState("");
   const [selectedColor, setSelectedColor] = useState("");
   const [priceFilter, setPriceFilter] = useState<PriceFilter>("all");
+  const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>("all");
   const [sortKey, setSortKey] = useState<SortKey>("popular");
 
   const sizeOptions = useMemo(() => {
@@ -105,9 +127,24 @@ export default function SearchSection({ allProducts }: SearchSectionProps) {
     return map;
   }, [allProducts]);
 
+  const newestIds = useMemo(() => {
+    const sortedNewest = sortProducts(allProducts, "newest", orderMap);
+    const takeCount = Math.min(8, sortedNewest.length);
+    return new Set(sortedNewest.slice(0, takeCount).map((product) => String(product.id)));
+  }, [allProducts, orderMap]);
+
   const filteredProducts = useMemo(
-    () => filterProducts(allProducts, keyword, selectedSize, selectedColor, priceFilter),
-    [allProducts, keyword, selectedSize, selectedColor, priceFilter]
+    () =>
+      filterProducts(
+        allProducts,
+        keyword,
+        selectedSize,
+        selectedColor,
+        priceFilter,
+        availabilityFilter,
+        newestIds
+      ),
+    [allProducts, keyword, selectedSize, selectedColor, priceFilter, availabilityFilter, newestIds]
   );
 
   const displayProducts = useMemo(
@@ -118,7 +155,7 @@ export default function SearchSection({ allProducts }: SearchSectionProps) {
   return (
     <div className="w-full">
       <ProductsSearch keyword={keyword} onKeywordChange={setKeyword} />
-      <div className="mt-5 grid gap-3 rounded-2xl border border-zinc-200 bg-white p-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-5 grid gap-3 rounded-2xl border border-zinc-200 bg-white p-4 sm:grid-cols-2 lg:grid-cols-5">
         <label className="block">
           <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-500">Size</span>
           <select
@@ -176,6 +213,20 @@ export default function SearchSection({ allProducts }: SearchSectionProps) {
             <option value="popular">Most popular</option>
             <option value="newest">Newest</option>
             <option value="price">Price (low to high)</option>
+          </select>
+        </label>
+
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-500">Availability</span>
+          <select
+            value={availabilityFilter}
+            onChange={(event) => setAvailabilityFilter(event.target.value as AvailabilityFilter)}
+            className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800 outline-none focus:border-zinc-500"
+          >
+            <option value="all">All</option>
+            <option value="in-stock">In stock</option>
+            <option value="out-of-stock">Out of stock</option>
+            <option value="new-arrival">New arrival</option>
           </select>
         </label>
       </div>

@@ -1,4 +1,7 @@
-import { getProducts } from "@/services/productService";
+import {
+  getInventorySnapshot,
+  summarizeInventoryCategories,
+} from "@/services/inventoryService";
 import AdminTable from "@/components/admin/ui/AdminTable";
 
 export const metadata = {
@@ -7,13 +10,8 @@ export const metadata = {
 };
 
 export default async function AdminCategoriesPage() {
-  const products = await getProducts().catch(() => []);
-  const categoryMap = new Map<string, number>();
-  for (const product of products) {
-    const category = (product.category ?? "Uncategorized").trim() || "Uncategorized";
-    categoryMap.set(category, (categoryMap.get(category) ?? 0) + 1);
-  }
-  const categories = Array.from(categoryMap.entries()).sort((a, b) => b[1] - a[1]);
+  const snapshot = await getInventorySnapshot().catch(() => []);
+  const categories = summarizeInventoryCategories(snapshot);
 
   return (
     <div className="space-y-5">
@@ -22,15 +20,18 @@ export default async function AdminCategoriesPage() {
         <p className="mt-1 text-sm text-zinc-600">A lightweight view of category coverage in your catalog.</p>
       </div>
       <AdminTable
-        columns={["Category", "Products"]}
+        columns={["Category", "Products", "Units in stock", "Low stock", "Out of stock"]}
         minWidthClassName="min-w-[520px]"
         isEmpty={categories.length === 0}
         emptyState={<p className="text-sm text-zinc-500">No categories found yet.</p>}
       >
-        {categories.map(([name, count]) => (
-          <tr key={name} className="border-b border-zinc-100">
-            <td className="px-4 py-3 text-zinc-800">{name}</td>
-            <td className="px-4 py-3 font-medium text-zinc-900">{count}</td>
+        {categories.map((category) => (
+          <tr key={category.name} className="border-b border-zinc-100">
+            <td className="px-4 py-3 text-zinc-800">{category.name}</td>
+            <td className="px-4 py-3 font-medium text-zinc-900">{category.productCount}</td>
+            <td className="px-4 py-3 font-medium text-zinc-900">{category.totalStock}</td>
+            <td className="px-4 py-3 text-amber-700">{category.lowStockCount}</td>
+            <td className="px-4 py-3 text-red-700">{category.outOfStockCount}</td>
           </tr>
         ))}
       </AdminTable>

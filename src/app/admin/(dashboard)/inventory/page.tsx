@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getProducts } from "@/services/productService";
+import { getInventorySnapshot } from "@/services/inventoryService";
 import AdminTable from "@/components/admin/ui/AdminTable";
 
 export const metadata = {
@@ -8,8 +8,8 @@ export const metadata = {
 };
 
 export default async function AdminInventoryPage() {
-  const products = await getProducts().catch(() => []);
-  const lowStockItems = products.filter((product) => Number(product.stock ?? 0) <= 5);
+  const snapshot = await getInventorySnapshot().catch(() => []);
+  const lowStockItems = snapshot.filter((item) => item.stock <= 5);
 
   return (
     <div className="space-y-5">
@@ -37,15 +37,15 @@ export default async function AdminInventoryPage() {
             <td className="px-4 py-3">
               <span
                 className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                  Number(product.stock ?? 0) <= 0
+                  product.stock <= 0
                     ? "bg-red-100 text-red-700"
                     : "bg-amber-100 text-amber-700"
                 }`}
               >
-                {product.stock ?? 0}
+                {product.stock}
               </span>
             </td>
-            <td className="px-4 py-3 text-zinc-600">{product.category || "Uncategorized"}</td>
+            <td className="px-4 py-3 text-zinc-600">{product.category}</td>
           </tr>
         ))}
       </AdminTable>

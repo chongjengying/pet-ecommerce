@@ -123,7 +123,7 @@ export default function AdminProductEditForm({ product }: AdminProductEditFormPr
     setBenefit(product.benefit ?? "");
     setIngredients(product.ingredients ?? "");
     setFeedingInstructions(product.feeding_instructions ?? "");
-  }, [product.id]);
+  }, [product]);
 
   const priceNum = Number(price);
   const stockNum = Number(stock);

@@ -79,15 +79,33 @@ async function requestCartApi(
 }
 
 function mapServerItemsToCartItems(serverItems: ServerCartItem[]): CartItem[] {
-  return serverItems.map((row) => ({
-    id: row.product_id,
-    name: row.product.name,
-    price: Number(row.price_at_time ?? 0),
-    image: row.product.image ?? undefined,
-    image_url: row.product.image_url ?? undefined,
-    stock: row.product.stock ?? undefined,
-    quantity: Math.max(1, Math.floor(Number(row.quantity ?? 1))),
-  }));
+  const mapped: CartItem[] = [];
+  for (const row of serverItems) {
+    const product =
+      row?.product && typeof row.product === "object"
+        ? row.product
+        : ({
+            id: String(row?.product_id ?? ""),
+            name: "Product",
+            image: null,
+            image_url: null,
+            stock: null,
+          } as ServerCartItem["product"]);
+
+    const id = String(row?.product_id ?? product.id ?? "").trim();
+    if (!id) continue;
+
+    mapped.push({
+      id,
+      name: String(product.name ?? "Product"),
+      price: Number(row?.price_at_time ?? 0),
+      image: product.image ?? undefined,
+      image_url: product.image_url ?? undefined,
+      stock: product.stock ?? undefined,
+      quantity: Math.max(1, Math.floor(Number(row?.quantity ?? 1))),
+    });
+  }
+  return mapped;
 }
 
 function persistCartSnapshot(items: CartItem[]) {
@@ -248,34 +266,87 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const removeFromCart = useCallback((productId: string) => {
     const id = String(productId);
+    let optimisticItems: CartItem[] = [];
+    setItems((prev) => {
+      optimisticItems = prev.filter((i) => String(i.id) !== id);
+      return optimisticItems;
+    });
+    persistCartSnapshot(optimisticItems);
+
     void (async () => {
       try {
         const res = await requestCartApi(`/api/cart?productId=${encodeURIComponent(id)}`, {
           method: "DELETE",
         });
         const data = (await res.json().catch(() => ({}))) as ServerCartResponse & { error?: string };
-        if (res.ok) {
-          const nextItems = Array.isArray(data.items) ? mapServerItemsToCartItems(data.items) : [];
+        if (res.ok && Array.isArray(data.items)) {
+          const nextItems = mapServerItemsToCartItems(data.items);
           startTransition(() => {
             setItems(nextItems);
           });
           persistCartSnapshot(nextItems);
-          window.dispatchEvent(new Event("cart-changed"));
           return;
         }
       } catch {
-        // Fall back to local removal below.
+        // Keep optimistic local state; next refresh can reconcile.
       }
-      setItems((prev) => prev.filter((i) => String(i.id) !== id));
-      persistCartSnapshot(items.filter((i) => String(i.id) !== id));
+      void refreshFromServer();
     })();
-  }, [items]);
+  }, [refreshFromServer]);
 
   const updateQuantity = useCallback((productId: string, quantity: number) => {
     const id = String(productId);
+    const requestedQty = Math.max(1, Math.floor(Number(quantity)));
+
+    let optimisticItems: CartItem[] = [];
+    setItems((prev) => {
+      if (quantity <= 0) {
+        optimisticItems = prev.filter((i) => String(i.id) !== id);
+        return optimisticItems;
+      }
+
+      const target = prev.find((i) => String(i.id) === id);
+      if (!target) {
+        optimisticItems = prev;
+        return prev;
+      }
+
+      const stockLimit = getStockLimit(target);
+      if (stockLimit !== undefined && stockLimit <= 0) {
+        optimisticItems = prev.filter((i) => String(i.id) !== id);
+        return optimisticItems;
+      }
+
+      const nextQty = stockLimit !== undefined ? Math.min(requestedQty, stockLimit) : requestedQty;
+      if (nextQty === target.quantity) {
+        optimisticItems = prev;
+        return prev;
+      }
+
+      optimisticItems = prev.map((i) => (String(i.id) === id ? { ...i, quantity: nextQty } : i));
+      return optimisticItems;
+    });
+    persistCartSnapshot(optimisticItems);
+
     void (async () => {
       try {
-        const action = quantity <= 0 ? "decrement" : "set";
+        if (quantity <= 0) {
+          const res = await requestCartApi(`/api/cart?productId=${encodeURIComponent(id)}`, {
+            method: "DELETE",
+          });
+          const data = (await res.json().catch(() => ({}))) as ServerCartResponse & { error?: string };
+          if (res.ok && Array.isArray(data.items)) {
+            const nextItems = mapServerItemsToCartItems(data.items);
+            startTransition(() => {
+              setItems(nextItems);
+            });
+            persistCartSnapshot(nextItems);
+            return;
+          }
+          void refreshFromServer();
+          return;
+        }
+
         const res = await requestCartApi("/api/cart", {
           method: "PATCH",
           headers: {
@@ -283,49 +354,25 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           },
           body: JSON.stringify({
             productId: id,
-            action,
-            quantity: Math.max(1, Math.floor(Number(quantity))),
+            action: "set",
+            quantity: requestedQty,
           }),
         });
         const data = (await res.json().catch(() => ({}))) as ServerCartResponse & { error?: string };
-        if (res.ok) {
-          const nextItems = Array.isArray(data.items) ? mapServerItemsToCartItems(data.items) : [];
+        if (res.ok && Array.isArray(data.items)) {
+          const nextItems = mapServerItemsToCartItems(data.items);
           startTransition(() => {
             setItems(nextItems);
           });
           persistCartSnapshot(nextItems);
-          window.dispatchEvent(new Event("cart-changed"));
           return;
         }
       } catch {
-        // Fall back to local quantity update below.
+        // Keep optimistic local state; next refresh can reconcile.
       }
-
-      if (quantity <= 0) {
-        const nextItems = items.filter((i) => String(i.id) !== id);
-        setItems(nextItems);
-        persistCartSnapshot(nextItems);
-        return;
-      }
-      setItems((prev) => {
-        const target = prev.find((i) => String(i.id) === id);
-        if (!target) return prev;
-
-        const stockLimit = getStockLimit(target);
-        if (stockLimit !== undefined && stockLimit <= 0) {
-          return prev.filter((i) => String(i.id) !== id);
-        }
-
-        const requestedQty = Math.max(1, Math.floor(Number(quantity)));
-        const nextQty = stockLimit !== undefined ? Math.min(requestedQty, stockLimit) : requestedQty;
-        if (nextQty === target.quantity) return prev;
-
-        const nextItems = prev.map((i) => (String(i.id) === id ? { ...i, quantity: nextQty } : i));
-        persistCartSnapshot(nextItems);
-        return nextItems;
-      });
+      void refreshFromServer();
     })();
-  }, [items]);
+  }, [refreshFromServer]);
 
   const cartCount = items.reduce((sum, i) => sum + i.quantity, 0);
   const clearCart = useCallback(() => {

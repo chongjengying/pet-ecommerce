@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 
 const sizeStyles = {
   sm: "h-10 w-10 min-h-[2.5rem] min-w-[2.5rem] text-[11px] leading-none tracking-wide",
@@ -31,14 +31,11 @@ type UserAvatarProps = {
  * Profile / nav avatar: soft gradient ring, shadow, graceful image fallback.
  */
 export function UserAvatar({ src, alt, initials, size = "md", className = "" }: UserAvatarProps) {
-  const [imgFailed, setImgFailed] = useState(false);
-
-  useEffect(() => {
-    setImgFailed(false);
-  }, [src]);
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const normalizedSrc = useMemo(() => String(src ?? "").trim(), [src]);
 
   const safeInitials = (initials || "?").slice(0, 2).toUpperCase();
-  const showPhoto = Boolean(src?.trim()) && !imgFailed;
+  const showPhoto = normalizedSrc.length > 0 && failedSrc !== normalizedSrc;
 
   return (
     <div
@@ -47,10 +44,10 @@ export function UserAvatar({ src, alt, initials, size = "md", className = "" }: 
       <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-white">
         {showPhoto ? (
           <img
-            src={src!.trim()}
+            src={normalizedSrc}
             alt={alt}
             className="h-full w-full object-cover"
-            onError={() => setImgFailed(true)}
+            onError={() => setFailedSrc(normalizedSrc)}
           />
         ) : (
           <span

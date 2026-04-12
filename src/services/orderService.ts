@@ -345,7 +345,9 @@ async function mapRowsToOrders(
             price: Number(row.unit_price ?? row.price ?? 0),
           }))
         : [];
-    const { order_items: _omit, ...rest } = order;
+    const rest = Object.fromEntries(
+      Object.entries(order).filter(([key]) => key !== "order_items")
+    ) as Omit<OrderSelectRow, "order_items">;
     return {
       ...rest,
       subtotal:

@@ -109,6 +109,8 @@ export async function resolveSessionUser(
   session: Pick<CustomerJwtPayload, "sub" | "username" | "email">
 ): Promise<ResolvedUser | null> {
   const sub = session.sub.trim();
+  const username = session.username.trim();
+  const email = session.email.trim().toLowerCase();
 
   const bySub = await selectUsersWithRoleFallback(supabase, (fields) =>
     supabase.from("users").select(fields).eq("id", sub).maybeSingle()
@@ -127,40 +129,60 @@ export async function resolveSessionUser(
     }
   }
 
-  const byUsernameResult = await selectUsersWithRoleFallback(supabase, (fields) =>
-    supabase.from("users").select(fields).ilike("username", session.username).order("id", { ascending: true }).limit(1)
-  );
-  if (byUsernameResult.rows.length > 0) {
-    return byUsernameResult.rows[0];
-  }
-
-  const byEmailResult = await selectUsersWithRoleFallback(supabase, (fields) =>
-    supabase.from("users").select(fields).ilike("email", session.email).order("id", { ascending: true }).limit(1)
-  );
-  if (byEmailResult.rows.length > 0) {
-    return byEmailResult.rows[0];
-  }
-
-  const profileMatch = await supabase
-    .from("profiles")
-    .select("user_id")
-    .ilike("username", session.username)
-    .order("user_id", { ascending: true })
-    .limit(1);
-  if (profileMatch.error && !isMissingProfilesTable(profileMatch.error)) {
-    return null;
-  }
-  const matchedUserId =
-    Array.isArray(profileMatch.data) && profileMatch.data.length > 0
-      ? profileMatch.data[0]?.user_id
-      : null;
-  if (matchedUserId != null) {
-    const uid = userIdForDbQuery(matchedUserId as string | number);
-    const byProfileResult = await selectUsersWithRoleFallback(supabase, (fields) =>
-      supabase.from("users").select(fields).eq("id", uid).maybeSingle()
+  if (username) {
+    const byUsernameExact = await selectUsersWithRoleFallback(supabase, (fields) =>
+      supabase.from("users").select(fields).eq("username", username).maybeSingle()
     );
-    if (byProfileResult.rows.length > 0) {
-      return byProfileResult.rows[0];
+    if (byUsernameExact.rows.length > 0) {
+      return byUsernameExact.rows[0];
+    }
+
+    const byUsernameInsensitive = await selectUsersWithRoleFallback(supabase, (fields) =>
+      supabase.from("users").select(fields).ilike("username", username).order("id", { ascending: true }).limit(1)
+    );
+    if (byUsernameInsensitive.rows.length > 0) {
+      return byUsernameInsensitive.rows[0];
+    }
+  }
+
+  if (email) {
+    const byEmailExact = await selectUsersWithRoleFallback(supabase, (fields) =>
+      supabase.from("users").select(fields).eq("email", email).maybeSingle()
+    );
+    if (byEmailExact.rows.length > 0) {
+      return byEmailExact.rows[0];
+    }
+
+    const byEmailInsensitive = await selectUsersWithRoleFallback(supabase, (fields) =>
+      supabase.from("users").select(fields).ilike("email", email).order("id", { ascending: true }).limit(1)
+    );
+    if (byEmailInsensitive.rows.length > 0) {
+      return byEmailInsensitive.rows[0];
+    }
+  }
+
+  if (username) {
+    const profileMatch = await supabase
+      .from("profiles")
+      .select("user_id")
+      .ilike("username", username)
+      .order("user_id", { ascending: true })
+      .limit(1);
+    if (profileMatch.error && !isMissingProfilesTable(profileMatch.error)) {
+      return null;
+    }
+    const matchedUserId =
+      Array.isArray(profileMatch.data) && profileMatch.data.length > 0
+        ? profileMatch.data[0]?.user_id
+        : null;
+    if (matchedUserId != null) {
+      const uid = userIdForDbQuery(matchedUserId as string | number);
+      const byProfileResult = await selectUsersWithRoleFallback(supabase, (fields) =>
+        supabase.from("users").select(fields).eq("id", uid).maybeSingle()
+      );
+      if (byProfileResult.rows.length > 0) {
+        return byProfileResult.rows[0];
+      }
     }
   }
 

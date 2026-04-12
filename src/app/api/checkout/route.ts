@@ -11,6 +11,7 @@ import { userIdForDbQuery } from "@/lib/userIdDb";
 import { finalizeCartAfterCheckout } from "@/lib/cartDb";
 import { decrementStock } from "@/services/productService";
 import { createOrder } from "@/services/orderService";
+import { sendCheckoutEmailNotification } from "@/lib/emailNotifications";
 
 type CartItemPayload = {
   id: string | number;
@@ -82,6 +83,13 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { error: "Profile not found." },
       { status: 404 }
+    );
+  }
+  const accountEmail = String(resolvedUser.email ?? "").trim() || String(session.email ?? "").trim();
+  if (!accountEmail) {
+    return NextResponse.json(
+      { error: "Account email is missing. Please update your profile email before checkout." },
+      { status: 400 }
     );
   }
   const orderUserId = await resolveCheckoutOrderUserId(supabase, session, resolvedUser.id);
@@ -179,11 +187,11 @@ export async function POST(request: Request) {
         customer: {
           auth_sub: String(session.sub),
           public_user_id: String(resolvedUser.id),
-          email: String(session.email),
+          email: accountEmail,
           username: String(session.username),
         },
         contact: {
-          email: String(session.email),
+          email: accountEmail,
           username: String(session.username),
           full_name: resolvedUser.full_name ?? null,
           phone: shippingPhone,
@@ -273,8 +281,38 @@ export async function POST(request: Request) {
     });
   }
 
+  const emailResult = await sendCheckoutEmailNotification({
+    to_email: accountEmail,
+    to_name: resolvedUser.full_name ?? shippingRecipientName ?? null,
+    order_number: createdOrder?.order_number ?? null,
+    currency: "MYR",
+    subtotal,
+    shipping_fee: 0,
+    tax_amount: 0,
+    total_amount: subtotal,
+    items: orderItems.map((item) => ({
+      name: item.name,
+      quantity: item.quantity,
+      unit_price: Number(item.price),
+      line_total: Number(item.price) * item.quantity,
+    })),
+  });
+  if (!emailResult.sent) {
+    console.warn("[api/checkout POST] Confirmation email failed", {
+      user_id: resolvedUser.id,
+      order_id: createdOrder?.id ?? null,
+      order_number: createdOrder?.order_number ?? null,
+      error: emailResult.error ?? "Unknown email error",
+    });
+  }
+
   return NextResponse.json({
     success: true,
+    email_notification: {
+      sent: emailResult.sent,
+      provider: emailResult.provider,
+      error: emailResult.sent ? null : emailResult.error ?? "Email send failed.",
+    },
     order: {
       id: createdOrder?.id ?? null,
       order_number: createdOrder?.order_number ?? null,

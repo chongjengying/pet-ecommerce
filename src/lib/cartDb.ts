@@ -364,7 +364,7 @@ async function createCart(supabase: Supabase, userIdKey: string | number): Promi
   delete payload.status;
   const noStatus = await supabase.from("cart").insert(payload).select(`${cartPk},user_id`).single();
   if (noStatus.error) return { cart: null, error: noStatus.error };
-  return { cart: noStatus.data as CartRow, error: null };
+  return { cart: noStatus.data as unknown as CartRow, error: null };
 }
 
 export async function getOrCreateCartId(supabase: Supabase, userIdKey: string | number): Promise<{ cartId: string | null; error: DbError }> {
@@ -416,8 +416,9 @@ export async function getCartView(supabase: Supabase, userIdKey: string | number
       .select(`${productPk},name,price,stock`)
       .in(productPk, productIdKeys);
     if (productsError) return { data: null, error: productsError };
+    const productsRows = (Array.isArray(productsData) ? productsData : []) as unknown as ProductRow[];
     productMap = new Map(
-      (Array.isArray(productsData) ? productsData : []).map((p) => [normalizeId((p as ProductRow)[productPk]), p as ProductRow])
+      productsRows.map((p) => [normalizeId(p[productPk]), p])
     );
 
     const { map, error: productImagesError } = await getProductImageMap(supabase, productIdKeys);
@@ -503,10 +504,11 @@ export async function getCartItemById(
     .maybeSingle();
   if (error) return { itemId: null, quantity: 0, error };
   if (!data) return { itemId: null, quantity: 0, error: null };
+  const row = data as unknown as CartItemRow;
 
   return {
-    itemId: normalizeId((data as CartItemRow)[itemPk]),
-    quantity: Math.max(1, Math.floor(normalizeNumber((data as CartItemRow).quantity, 1))),
+    itemId: normalizeId(row[itemPk]),
+    quantity: Math.max(1, Math.floor(normalizeNumber(row.quantity, 1))),
     error: null,
   };
 }
@@ -531,10 +533,11 @@ export async function getCartItemByProductId(
     .maybeSingle();
   if (error) return { itemId: null, quantity: 0, error };
   if (!data) return { itemId: null, quantity: 0, error: null };
+  const row = data as unknown as CartItemRow;
 
   return {
-    itemId: normalizeId((data as CartItemRow)[itemPk]),
-    quantity: Math.max(1, Math.floor(normalizeNumber((data as CartItemRow).quantity, 1))),
+    itemId: normalizeId(row[itemPk]),
+    quantity: Math.max(1, Math.floor(normalizeNumber(row.quantity, 1))),
     error: null,
   };
 }

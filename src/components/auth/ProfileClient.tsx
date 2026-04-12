@@ -124,6 +124,9 @@ export default function ProfileClient({
     if (initialUser && token) {
       writeProfileCache(token, initialUser);
       setLoading(false);
+      return () => {
+        active = false;
+      };
     }
 
     const cached = !initialUser ? readProfileCache(token) : null;

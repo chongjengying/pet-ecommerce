@@ -148,6 +148,57 @@ function readEmailFromToken(): string {
   }
 }
 
+function normalizeCartItems(input: unknown): CartRowItem[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((raw): CartRowItem | null => {
+      if (!raw || typeof raw !== "object") return null;
+      const row = raw as Record<string, unknown>;
+      const productRaw =
+        row.product && typeof row.product === "object"
+          ? (row.product as Record<string, unknown>)
+          : null;
+
+      const productId = String(productRaw?.id ?? row.product_id ?? row.id ?? "");
+      if (!productId) return null;
+
+      const quantity = Math.max(1, Math.floor(Number(row.quantity ?? 1)));
+      const unitPrice = Number(row.price_at_time ?? row.price ?? 0);
+      const lineTotalRaw = Number(row.line_total);
+      const stockRaw = productRaw?.stock;
+      const stock = stockRaw == null ? null : Number(stockRaw);
+
+      return {
+        id: String(row.id ?? productId),
+        product_id: String(row.product_id ?? productId),
+        quantity,
+        price_at_time: Number.isFinite(unitPrice) ? unitPrice : 0,
+        line_total:
+          Number.isFinite(lineTotalRaw)
+            ? lineTotalRaw
+            : (Number.isFinite(unitPrice) ? unitPrice : 0) * quantity,
+        product: {
+          id: productId,
+          name: String(productRaw?.name ?? row.name ?? "Product"),
+          image:
+            typeof productRaw?.image === "string"
+              ? productRaw.image
+              : typeof row.image === "string"
+                ? row.image
+                : null,
+          image_url:
+            typeof productRaw?.image_url === "string"
+              ? productRaw.image_url
+              : typeof row.image_url === "string"
+                ? row.image_url
+                : null,
+          stock: Number.isFinite(stock) ? stock : null,
+        },
+      };
+    })
+    .filter((item): item is CartRowItem => item != null);
+}
+
 function readCartSnapshot(): CartResponse | null {
   if (typeof window === "undefined") return null;
   try {
@@ -158,7 +209,7 @@ function readCartSnapshot(): CartResponse | null {
       cart_id: String(parsed.cart_id ?? ""),
       item_count: Number(parsed.item_count ?? 0),
       subtotal: Number(parsed.subtotal ?? 0),
-      items: Array.isArray(parsed.items) ? (parsed.items as CartRowItem[]) : [],
+      items: normalizeCartItems(parsed.items),
     };
   } catch {
     return null;
@@ -212,7 +263,8 @@ export default function CartPage() {
   const email = useMemo(() => readEmailFromToken(), []);
 
   const fetchCart = useCallback(async () => {
-    setLoading(true);
+    const hasLocalSnapshot = Boolean(cart && cart.items.length > 0);
+    if (!hasLocalSnapshot) setLoading(true);
     setError(null);
     try {
       const res = await requestWithCustomerAuth("/api/cart");
@@ -223,22 +275,26 @@ export default function CartPage() {
           return;
         }
         setError(formatApiError("Load cart", "GET /api/cart", res.status, data));
-        setCart({ cart_id: "", item_count: 0, subtotal: 0, items: [] });
+        if (!hasLocalSnapshot) {
+          setCart({ cart_id: "", item_count: 0, subtotal: 0, items: [] });
+        }
         return;
       }
       setCart({
         cart_id: String(data.cart_id ?? ""),
         item_count: Number(data.item_count ?? 0),
         subtotal: Number(data.subtotal ?? 0),
-        items: Array.isArray(data.items) ? (data.items as CartRowItem[]) : [],
+        items: normalizeCartItems(data.items),
       });
     } catch {
       setError("[GET /api/cart] Could not reach server.");
-      setCart({ cart_id: "", item_count: 0, subtotal: 0, items: [] });
+      if (!hasLocalSnapshot) {
+        setCart({ cart_id: "", item_count: 0, subtotal: 0, items: [] });
+      }
     } finally {
-      setLoading(false);
+      if (!hasLocalSnapshot) setLoading(false);
     }
-  }, [router]);
+  }, [cart, router]);
 
   const fetchDefaultAddress = useCallback(async () => {
     try {
