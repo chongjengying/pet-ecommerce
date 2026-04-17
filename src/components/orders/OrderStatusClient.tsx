@@ -1,10 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import type { CustomerOrderStatusData } from "@/lib/customerOrders";
 
 type OrderStatusClientProps = {
   orders: CustomerOrderStatusData[];
+  initialOrderId?: string | null;
 };
 
 type ActionState = "idle" | "tracking" | "invoice" | "cancel" | "support";
@@ -139,6 +141,99 @@ function buildInvoiceText(order: CustomerOrderStatusData): string {
   return lines.join("\n");
 }
 
+async function buildInvoicePdf(order: CustomerOrderStatusData): Promise<Uint8Array> {
+  const content = buildInvoiceText(order);
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const fontBold = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  const pageSize = { width: 595.28, height: 841.89 }; // A4
+  const marginX = 48;
+  const marginY = 56;
+  const bodyFontSize = 10;
+  const headingFontSize = 16;
+  const lineHeight = 14;
+  const maxTextWidth = pageSize.width - marginX * 2;
+
+  let page = pdf.addPage([pageSize.width, pageSize.height]);
+  let cursorY = pageSize.height - marginY;
+
+  const drawHeader = () => {
+    page.drawText("PAWLUXE", {
+      x: marginX,
+      y: cursorY,
+      size: headingFontSize,
+      font: fontBold,
+      color: rgb(0.12, 0.12, 0.12),
+    });
+    page.drawText("Invoice", {
+      x: marginX,
+      y: cursorY - 22,
+      size: 12,
+      font: font,
+      color: rgb(0.28, 0.28, 0.28),
+    });
+    cursorY -= 42;
+    page.drawLine({
+      start: { x: marginX, y: cursorY },
+      end: { x: pageSize.width - marginX, y: cursorY },
+      thickness: 1,
+      color: rgb(0.85, 0.85, 0.85),
+    });
+    cursorY -= 18;
+  };
+
+  const appendNewPage = () => {
+    page = pdf.addPage([pageSize.width, pageSize.height]);
+    cursorY = pageSize.height - marginY;
+    drawHeader();
+  };
+
+  const splitLine = (line: string): string[] => {
+    if (!line.trim()) return [""];
+    const words = line.split(" ");
+    const chunks: string[] = [];
+    let current = "";
+
+    for (const word of words) {
+      const test = current ? `${current} ${word}` : word;
+      const width = font.widthOfTextAtSize(test, bodyFontSize);
+      if (width <= maxTextWidth) {
+        current = test;
+      } else {
+        if (current) chunks.push(current);
+        current = word;
+      }
+    }
+    if (current) chunks.push(current);
+    return chunks.length ? chunks : [""];
+  };
+
+  const drawBodyLine = (line: string) => {
+    const lines = splitLine(line);
+    for (const wrapped of lines) {
+      if (cursorY <= marginY) {
+        appendNewPage();
+      }
+      page.drawText(wrapped, {
+        x: marginX,
+        y: cursorY,
+        size: bodyFontSize,
+        font,
+        color: rgb(0.15, 0.15, 0.15),
+      });
+      cursorY -= lineHeight;
+    }
+  };
+
+  drawHeader();
+  for (const line of content.split("\n")) {
+    drawBodyLine(line);
+  }
+
+  return pdf.save();
+}
+
 function ActionButton({
   label,
   tone,
@@ -168,10 +263,10 @@ function ActionButton({
   );
 }
 
-export default function OrderStatusClient({ orders }: OrderStatusClientProps) {
+export default function OrderStatusClient({ orders, initialOrderId = null }: OrderStatusClientProps) {
   const [actionState, setActionState] = useState<ActionState>("idle");
   const [feedback, setFeedback] = useState<string | null>(null);
-  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(initialOrderId);
 
   const order = useMemo(() => {
     if (!orders.length) return null;
@@ -187,21 +282,22 @@ export default function OrderStatusClient({ orders }: OrderStatusClientProps) {
     window.setTimeout(() => setActionState("idle"), 500);
   };
 
-  const downloadInvoice = (orderToDownload: CustomerOrderStatusData) => {
+  const downloadInvoice = async (orderToDownload: CustomerOrderStatusData) => {
     try {
       setActionState("invoice");
-      const invoiceText = buildInvoiceText(orderToDownload);
-      const blob = new Blob([invoiceText], { type: "text/plain;charset=utf-8" });
+      const pdfBytes = await buildInvoicePdf(orderToDownload);
+      const pdfBuffer = new Uint8Array(pdfBytes).buffer;
+      const blob = new Blob([pdfBuffer], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       const safeOrderNumber = orderToDownload.orderNumber.replace(/[^a-zA-Z0-9-_]/g, "_");
       anchor.href = url;
-      anchor.download = `invoice-${safeOrderNumber || orderToDownload.id}.txt`;
+      anchor.download = `invoice-${safeOrderNumber || orderToDownload.id}.pdf`;
       document.body.appendChild(anchor);
       anchor.click();
       document.body.removeChild(anchor);
       URL.revokeObjectURL(url);
-      setFeedback("Invoice downloaded.");
+      setFeedback("Invoice PDF downloaded.");
     } catch (error) {
       setFeedback(`Invoice download failed: ${error instanceof Error ? error.message : "Unknown error"}`);
     } finally {

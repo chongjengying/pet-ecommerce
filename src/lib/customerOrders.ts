@@ -2,6 +2,7 @@ import type { CustomerJwtPayload } from "@/lib/customerJwt";
 import { resolveSessionUser } from "@/lib/customerProfile";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
 import { userIdForDbQuery } from "@/lib/userIdDb";
+import { getPaymentsByOrderIds, type PaymentRow } from "@/services/paymentService";
 
 type OrderItemRow = {
   order_id?: string | number | null;
@@ -205,7 +206,29 @@ function buildPayment(row: OrderSelectRow, metadata: Record<string, unknown> | n
   };
 }
 
-function mapOrder(row: OrderSelectRow): CustomerOrderStatusData {
+function buildPaymentWithRecord(
+  row: OrderSelectRow,
+  metadata: Record<string, unknown> | null,
+  orderStatus: string,
+  paymentRow: PaymentRow | null
+) {
+  const fallback = buildPayment(row, metadata, orderStatus);
+  if (!paymentRow) return fallback;
+  return {
+    status: cleanMaybeString(paymentRow.status) ?? fallback.status,
+    method:
+      cleanMaybeString(paymentRow.payment_method) ??
+      cleanMaybeString(paymentRow.provider) ??
+      fallback.method,
+    paidAt: cleanMaybeString(paymentRow.paid_at) ?? fallback.paidAt,
+    cardLabel:
+      cleanMaybeString(paymentRow.reference_no) ??
+      cleanMaybeString(paymentRow.transaction_id) ??
+      fallback.cardLabel,
+  };
+}
+
+function mapOrderWithPayment(row: OrderSelectRow, paymentRow: PaymentRow | null): CustomerOrderStatusData {
   const items = buildItems(row.order_items);
   const subtotal =
     row.subtotal != null ? normalizeNumber(row.subtotal, 0) : items.reduce((sum, item) => sum + item.totalPrice, 0);
@@ -229,7 +252,7 @@ function mapOrder(row: OrderSelectRow): CustomerOrderStatusData {
     notes: cleanMaybeString(row.notes),
     items,
     shipping: buildShipping(row, metadata),
-    payment: buildPayment(row, metadata, status),
+    payment: buildPaymentWithRecord(row, metadata, status, paymentRow),
   };
 }
 
@@ -279,19 +302,27 @@ async function mapOrdersWithItemFallback(
 ): Promise<CustomerOrderStatusData[]> {
   if (rows.length === 0) return [];
   const needsFallback = rows.some((row) => !Array.isArray(row.order_items) || row.order_items.length === 0);
-  if (!needsFallback) return rows.map(mapOrder);
+  const orderIdsBase = rows.map((row) => String(row.id ?? "")).filter((id) => id.length > 0);
+  const paymentMapBase = await getPaymentsByOrderIds(orderIdsBase).catch(() => new Map<string, PaymentRow>());
+  if (!needsFallback) {
+    return rows.map((row) => {
+      const id = String(row.id ?? "");
+      return mapOrderWithPayment(row, id ? paymentMapBase.get(id) ?? null : null);
+    });
+  }
 
-  const orderIds = rows.map((row) => String(row.id ?? "")).filter((id) => id.length > 0);
+  const orderIds = orderIdsBase;
   const itemMap = await fetchOrderItemsMap(supabase, orderIds);
 
   return rows.map((row) => {
     const key = String(row.id ?? "");
     const existingItems = Array.isArray(row.order_items) && row.order_items.length > 0 ? row.order_items : null;
     const fallbackItems = key ? itemMap.get(key) ?? null : null;
-    return mapOrder({
+    const mergedRow = {
       ...row,
       order_items: existingItems ?? fallbackItems ?? row.order_items,
-    });
+    };
+    return mapOrderWithPayment(mergedRow, key ? paymentMapBase.get(key) ?? null : null);
   });
 }
 

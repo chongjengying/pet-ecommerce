@@ -4,9 +4,11 @@ import ProfileClient from "@/components/auth/ProfileClient";
 import { CUSTOMER_SESSION_COOKIE, verifyCustomerJwt } from "@/lib/customerJwt";
 import {
   loadCustomerProfileForSession,
+  resolveSessionUser,
   type ProfileUser,
 } from "@/lib/customerProfile";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
+import { readEmailVerificationStatus } from "@/lib/emailVerification";
 
 export const metadata = {
   title: "My Profile - PAWLUXE",
@@ -27,6 +29,18 @@ export default async function ProfilePage() {
 
   try {
     const supabase = getSupabaseServerClient();
+    const resolvedUser = await resolveSessionUser(supabase, {
+      sub: session.sub,
+      username: session.username,
+      email: session.email,
+    });
+    if (resolvedUser) {
+      const verification = await readEmailVerificationStatus(supabase, resolvedUser.id);
+      if (!verification.error && verification.configured && !verification.isEmailVerified) {
+        const email = encodeURIComponent(verification.email ?? session.email);
+        redirect(`/auth/verify-email?email=${email}&source=protected`);
+      }
+    }
     const result = await loadCustomerProfileForSession(supabase, {
       sub: session.sub,
       username: session.username,

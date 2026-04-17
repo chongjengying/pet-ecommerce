@@ -46,6 +46,9 @@ export async function createOrder(
     shipping_state?: string | null;
     shipping_postal_code?: string | null;
     shipping_country?: string | null;
+    payment_method_code?: string | null;
+    payment_provider?: string | null;
+    payment_snapshot?: Record<string, unknown> | null;
     metadata?: Record<string, unknown> | null;
   }
 ): Promise<OrderRow> {
@@ -79,6 +82,9 @@ export async function createOrder(
     shipping_state?: string | null;
     shipping_postal_code?: string | null;
     shipping_country?: string | null;
+    payment_method_code?: string | null;
+    payment_provider?: string | null;
+    payment_snapshot?: Record<string, unknown> | null;
     metadata?: Record<string, unknown> | null;
     user_id?: string | number;
   } = {
@@ -130,6 +136,15 @@ export async function createOrder(
   }
   if (options?.shipping_country !== undefined) {
     orderPayload.shipping_country = options.shipping_country;
+  }
+  if (options?.payment_method_code !== undefined) {
+    orderPayload.payment_method_code = options.payment_method_code;
+  }
+  if (options?.payment_provider !== undefined) {
+    orderPayload.payment_provider = options.payment_provider;
+  }
+  if (options?.payment_snapshot !== undefined) {
+    orderPayload.payment_snapshot = options.payment_snapshot;
   }
   if (options?.metadata != null) {
     orderPayload.metadata = options.metadata;

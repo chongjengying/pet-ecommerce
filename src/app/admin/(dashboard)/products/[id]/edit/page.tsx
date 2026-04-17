@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import AdminProductForm from "@/components/admin/AdminProductForm";
 import { getProductById, getProducts } from "@/services/productService";
+import AdminPageHeader from "@/components/admin/ui/AdminPageHeader";
 
 const defaultCategories = ["Food", "Treats", "Supplements", "Accessories", "Grooming"];
 
@@ -26,16 +27,17 @@ export default async function AdminEditProductPage({
   ) as string[];
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 md:text-3xl">Edit Product</h1>
-          <p className="mt-1 text-sm text-zinc-600">Update product details and media in one place.</p>
-        </div>
-        <Link href="/admin/products" className="text-sm font-medium text-zinc-600 hover:text-zinc-900">
-          Back to Products
-        </Link>
-      </div>
+    <div className="space-y-6">
+      <AdminPageHeader
+        eyebrow="Catalog"
+        title="Edit Product"
+        description="Update product details and media in one place."
+        actions={
+          <Link href="/admin/products" className="text-sm font-medium text-cyan-700 hover:text-cyan-800">
+            Back to Products
+          </Link>
+        }
+      />
       <AdminProductForm mode="edit" product={product} categoryOptions={categoryOptions} />
     </div>
   );

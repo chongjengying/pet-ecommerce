@@ -91,7 +91,40 @@ type CheckoutAddressPayload = {
   phone: string;
 };
 
+type PaymentMethodId = "adaptis_gateway" | "grab" | "bank_transfer";
+
+type PaymentMethodOption = {
+  id: PaymentMethodId;
+  title: string;
+  subtitle: string;
+  note?: string;
+  logos: string[];
+  description?: string;
+};
+
 const CART_SNAPSHOT_KEY = "customer_cart_snapshot";
+
+const PAYMENT_METHODS: PaymentMethodOption[] = [
+  {
+    id: "adaptis_gateway",
+    title: "ADAPTIS Payment Gateway (formerly iPay88)",
+    subtitle: "Redirect to complete your purchase securely.",
+    description: "You'll be redirected to ADAPTIS Payment Gateway (formerly iPay88) to complete your purchase.",
+    logos: ["VISA", "MC", "FPX", "TnG"],
+  },
+  {
+    id: "grab",
+    title: "Grab",
+    subtitle: "Pay today or later at 0% interest.",
+    logos: ["Grab", "VISA", "MC", "AMEX"],
+  },
+  {
+    id: "bank_transfer",
+    title: "Cash Deposit / Online Transfer",
+    subtitle: "Pay via bank transfer or cash deposit.",
+    logos: [],
+  },
+];
 
 function readToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -199,7 +232,9 @@ function normalizeCartItems(input: unknown): CartRowItem[] {
     .filter((item): item is CartRowItem => item != null);
 }
 
-function readCartSnapshot(): CartResponse | null {
+// Hydration-safe helper: called only after mount from useEffect.
+// Never call this during initial render so server/client HTML stays identical.
+function getCartFromLocalStorage(): CartResponse | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(CART_SNAPSHOT_KEY);
@@ -225,15 +260,45 @@ function clearCartSnapshot() {
   }
 }
 
+function CartPageSkeleton() {
+  return (
+    <div className="bg-cream">
+      <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
+        <div className="rounded-3xl border border-amber-200/60 bg-gradient-to-br from-amber-50 to-sage-light/20 p-6 shadow-sm sm:p-10">
+          <div className="animate-pulse">
+            <div className="h-4 w-28 rounded bg-amber-200/80" />
+            <div className="mt-3 h-10 w-56 rounded bg-amber-200/70" />
+            <div className="mt-2 h-4 w-80 max-w-full rounded bg-amber-100/90" />
+          </div>
+          <div className="mt-8 grid gap-6 lg:grid-cols-[1.45fr_0.9fr]">
+            <div className="space-y-6">
+              <div className="h-40 rounded-2xl border border-amber-200/70 bg-white p-6 shadow-sm" />
+              <div className="h-80 rounded-2xl border border-amber-200/70 bg-white p-6 shadow-sm" />
+              <div className="h-44 rounded-2xl border border-amber-200/70 bg-white p-6 shadow-sm" />
+            </div>
+            <div className="h-72 rounded-2xl border border-amber-200/70 bg-white p-6 shadow-sm" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CartPage() {
   const router = useRouter();
-  const [cart, setCart] = useState<CartResponse | null>(() => readCartSnapshot());
-  const [loading, setLoading] = useState(() => readCartSnapshot() == null);
+  const [mounted, setMounted] = useState(false);
+  const [cart, setCart] = useState<CartResponse | null>(null);
+  const [loading, setLoading] = useState(true);
   const [checkingOut, setCheckingOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [checkoutSuccess, setCheckoutSuccess] = useState(false);
   const [placedOrder, setPlacedOrder] = useState<CheckoutSuccessOrder | null>(null);
+  const [email, setEmail] = useState("guest@checkout.com");
+  const [discountCode, setDiscountCode] = useState("");
+  const [appliedDiscountCode, setAppliedDiscountCode] = useState<string | null>(null);
+  const [discountMessage, setDiscountMessage] = useState<string | null>(null);
+  const [paymentMethodId, setPaymentMethodId] = useState<PaymentMethodId>("adaptis_gateway");
   const [addressForm, setAddressForm] = useState<CheckoutAddressForm>({
     country: "Malaysia",
     firstName: "",
@@ -258,12 +323,67 @@ export default function CartPage() {
     phone: "",
   });
 
-  const itemCount = cart?.item_count ?? 0;
-  const subtotal = useMemo(() => cart?.subtotal ?? 0, [cart?.subtotal]);
-  const email = useMemo(() => readEmailFromToken(), []);
+  const cartItems = useMemo(() => cart?.items ?? [], [cart?.items]);
+  const itemCount = useMemo(
+    () => cartItems.reduce((sum, item) => sum + Math.max(1, Math.floor(Number(item.quantity ?? 1))), 0),
+    [cartItems]
+  );
+  const subtotal = useMemo(
+    () =>
+      cartItems.reduce((sum, item) => {
+        const unitPrice = Number(item.price_at_time);
+        const quantity = Math.max(1, Math.floor(Number(item.quantity ?? 1)));
+        return sum + (Number.isFinite(unitPrice) ? unitPrice : 0) * quantity;
+      }, 0),
+    [cartItems]
+  );
+  const shippingEstimate = useMemo(() => (subtotal >= 150 ? 0 : cartItems.length > 0 ? 12 : 0), [cartItems.length, subtotal]);
+  const discountAmount = useMemo(() => {
+    if (!appliedDiscountCode) return 0;
+    if (appliedDiscountCode === "SAVE10") return subtotal * 0.1;
+    if (appliedDiscountCode === "FREESHIP") return shippingEstimate;
+    return 0;
+  }, [appliedDiscountCode, shippingEstimate, subtotal]);
+  const total = useMemo(
+    () => Math.max(0, subtotal + shippingEstimate - discountAmount),
+    [discountAmount, shippingEstimate, subtotal]
+  );
+  const shippingSummary = useMemo(() => {
+    const recipient = [addressForm.firstName.trim(), addressForm.lastName.trim()].filter(Boolean).join(" ");
+    const addressLine = [addressForm.address1, addressForm.address2].map((value) => value.trim()).filter(Boolean).join(", ");
+    const locality = [addressForm.city, addressForm.state, addressForm.postalCode]
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .join(", ");
+    const country = addressForm.country.trim();
+    return [recipient, addressLine, locality, country].filter(Boolean).join(" · ") || "Shipping address will appear here.";
+  }, [addressForm]);
 
-  const fetchCart = useCallback(async () => {
-    const hasLocalSnapshot = Boolean(cart && cart.items.length > 0);
+  const applyDiscountCode = () => {
+    const normalized = discountCode.trim().toUpperCase();
+    if (!normalized) {
+      setAppliedDiscountCode(null);
+      setDiscountMessage("Enter a code to apply it.");
+      return;
+    }
+
+    if (normalized === "SAVE10") {
+      setAppliedDiscountCode(normalized);
+      setDiscountMessage("Code applied: 10% off your order.");
+      return;
+    }
+
+    if (normalized === "FREESHIP") {
+      setAppliedDiscountCode(normalized);
+      setDiscountMessage("Code applied: shipping discounted.");
+      return;
+    }
+
+    setAppliedDiscountCode(null);
+    setDiscountMessage("That code is not valid.");
+  };
+
+  const fetchCart = useCallback(async (hasLocalSnapshot = false) => {
     if (!hasLocalSnapshot) setLoading(true);
     setError(null);
     try {
@@ -294,7 +414,7 @@ export default function CartPage() {
     } finally {
       if (!hasLocalSnapshot) setLoading(false);
     }
-  }, [cart, router]);
+  }, [router]);
 
   const fetchDefaultAddress = useCallback(async () => {
     try {
@@ -333,9 +453,24 @@ export default function CartPage() {
   }, []);
 
   useEffect(() => {
-    void fetchCart();
+    setMounted(true);
+    setEmail(readEmailFromToken());
+    const localCart = getCartFromLocalStorage();
+    const hasLocalSnapshot = Boolean(localCart && localCart.items.length > 0);
+    if (localCart) setCart(localCart);
+    if (hasLocalSnapshot) setLoading(false);
+
+    void fetchCart(hasLocalSnapshot);
     void fetchDefaultAddress();
   }, [fetchCart, fetchDefaultAddress]);
+
+  useEffect(() => {
+    const onCartChanged = () => {
+      void fetchCart(true);
+    };
+    window.addEventListener("cart-changed", onCartChanged);
+    return () => window.removeEventListener("cart-changed", onCartChanged);
+  }, [fetchCart]);
 
   useEffect(() => {
     router.prefetch("/profile/orders");
@@ -353,7 +488,7 @@ export default function CartPage() {
 
   const handleCheckout = async () => {
     setCheckoutError(null);
-    if (!cart || cart.items.length === 0) return;
+    if (!cart || cartItems.length === 0) return;
 
     setCheckingOut(true);
     try {
@@ -403,7 +538,7 @@ export default function CartPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          items: cart.items.map((item) => ({
+          items: cartItems.map((item) => ({
             id: item.product_id,
             quantity: item.quantity,
             name: item.product.name,
@@ -412,6 +547,7 @@ export default function CartPage() {
           shipping_address: shippingPayload,
           billing_address: billingPayload,
           billing_same_as_shipping: sameBillingAsShipping,
+          payment_method: paymentMethodId,
         }),
       });
       const data = (await res.json().catch(() => ({}))) as CheckoutSuccessPayload;
@@ -444,7 +580,7 @@ export default function CartPage() {
           postal_code: addressForm.postalCode.trim() || null,
           country: addressForm.country.trim() || null,
         },
-        items: cart.items.map((item) => ({
+        items: cartItems.map((item) => ({
           id: item.product_id,
           name: item.product.name,
           quantity: item.quantity,
@@ -467,17 +603,10 @@ export default function CartPage() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="bg-cream">
-        <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6">
-          <div className="rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm">
-            <p className="text-sm text-zinc-600">Loading cart...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // Important hydration fix:
+  // - Server render and first client render both return the same skeleton.
+  // - We only read localStorage and render cart-dependent UI after mount.
+  if (!mounted || loading) return <CartPageSkeleton />;
 
   if (checkoutSuccess) {
     const order = placedOrder;
@@ -501,7 +630,15 @@ export default function CartPage() {
               <h2 className="text-2xl font-bold text-zinc-900">Thank you!</h2>
               <p className="mt-2 text-zinc-600">Your order has been placed successfully.</p>
               {order?.order_number ? (
-                <p className="mt-2 text-sm font-semibold text-zinc-800">Order No: {order.order_number}</p>
+                <p className="mt-2 text-sm font-semibold text-zinc-800">
+                  Order No:{" "}
+                  <Link
+                    href={`/profile/orders?order=${encodeURIComponent(String(order.id ?? order.order_number ?? ""))}`}
+                    className="text-umber underline decoration-amber-400 underline-offset-4 transition hover:text-umber/80"
+                  >
+                    {order.order_number}
+                  </Link>
+                </p>
               ) : null}
               <p className="mt-2 text-sm text-zinc-500">Redirecting to your orders...</p>
             </div>
@@ -547,10 +684,10 @@ export default function CartPage() {
 
             <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
               <Link
-                href="/profile/orders"
+                href={`/profile/orders?order=${encodeURIComponent(String(order?.id ?? order?.order_number ?? ""))}`}
                 className="inline-block rounded-xl bg-zinc-900 px-6 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800"
               >
-                Check Orders
+                View Order Summary
               </Link>
               <Link
                 href="/products"
@@ -702,6 +839,11 @@ export default function CartPage() {
                   />
                   Billing address is the same as shipping
                 </label>
+                {sameBillingAsShipping ? (
+                  <p className="mt-3 rounded-xl border border-amber-200 bg-cream px-3 py-2 text-sm text-umber/80">
+                    Billing summary: {shippingSummary}
+                  </p>
+                ) : null}
               </div>
 
               {!sameBillingAsShipping ? (
@@ -791,15 +933,81 @@ export default function CartPage() {
               ) : null}
 
               <div className="rounded-2xl border border-amber-200/70 bg-white p-5 shadow-sm sm:p-6">
-                <h2 className="text-xl font-semibold text-umber">Payment</h2>
-                <div className="mt-4 rounded-xl border border-terracotta/40 bg-terracotta/95 p-4 text-white">
-                  <p className="text-sm font-semibold uppercase tracking-[0.14em] text-white/90">Card details</p>
-                  <div className="mt-3 grid gap-3 sm:grid-cols-[1.3fr_0.7fr_0.7fr]">
-                    <div className="rounded-lg border border-white/50 px-3 py-2.5 text-sm font-semibold">1234 1234 1234 1234</div>
-                    <div className="rounded-lg border border-white/50 px-3 py-2.5 text-sm font-semibold">MM/YY</div>
-                    <div className="rounded-lg border border-white/50 px-3 py-2.5 text-sm font-semibold">CVC</div>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-semibold text-umber">Payment</h2>
+                    <p className="mt-1 text-sm text-umber/70">All transactions are secure and encrypted.</p>
                   </div>
-                  <p className="mt-3 text-xs text-white/90">Secure payment placeholder. Your backend checkout flow remains unchanged.</p>
+                  <div className="hidden sm:flex items-center gap-2">
+                    <span className="rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-bold tracking-wide text-zinc-700">VISA</span>
+                    <span className="rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-bold tracking-wide text-zinc-700">MC</span>
+                    <span className="rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-bold tracking-wide text-zinc-700">FPX</span>
+                  </div>
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  {PAYMENT_METHODS.map((method) => {
+                    const selected = paymentMethodId === method.id;
+                    return (
+                      <label
+                        key={method.id}
+                        className={`block cursor-pointer rounded-2xl border p-4 transition ${
+                          selected
+                            ? "border-amber-300 bg-amber-50 shadow-sm"
+                            : "border-zinc-200 bg-white hover:border-amber-200 hover:bg-amber-50/40"
+                        }`}
+                      >
+                        <div className="flex items-start gap-3 sm:items-center">
+                          <input
+                            type="radio"
+                            name="payment-method"
+                            value={method.id}
+                            checked={selected}
+                            onChange={() => setPaymentMethodId(method.id)}
+                            className="mt-1 h-5 w-5 border-zinc-300 text-umber focus:ring-umber sm:mt-0"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-base font-medium text-umber">{method.title}</p>
+                              {selected ? (
+                                <span className="rounded-full bg-umber px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-white">
+                                  Selected
+                                </span>
+                              ) : null}
+                            </div>
+                            <p className="mt-1 text-sm text-umber/70">{method.subtitle}</p>
+                            {method.description && selected ? (
+                              <div className="mt-4 rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700">
+                                {method.description}
+                              </div>
+                            ) : null}
+                          </div>
+                          {method.logos.length > 0 ? (
+                            <div className="flex flex-wrap items-center justify-end gap-2">
+                              {method.logos.map((logo) => (
+                                <span
+                                  key={logo}
+                                  className="rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-bold tracking-wide text-zinc-700"
+                                >
+                                  {logo}
+                                </span>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-4 rounded-xl border border-amber-200 bg-cream px-4 py-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-umber">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4 fill-current">
+                      <path d="M17 8h-1V6a4 4 0 1 0-8 0v2H7a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2Zm-7-2a2 2 0 1 1 4 0v2h-4V6Z" />
+                    </svg>
+                    <span>Secure payment</span>
+                  </div>
+                  <p className="mt-1 text-sm text-umber/70">Payments are encrypted and processed securely.</p>
                 </div>
               </div>
 
@@ -819,26 +1027,94 @@ export default function CartPage() {
             </section>
 
             <aside className="h-fit rounded-2xl border border-amber-200/70 bg-white p-5 shadow-sm sm:p-6 lg:sticky lg:top-24">
-              <h3 className="text-2xl font-semibold text-umber">Order Summary</h3>
-              <p className="mt-1 text-sm text-umber/70">{itemCount} items</p>
-              <div className="mt-5 space-y-4">
-                {cart?.items.map((item, index) => (
-                  <div key={`${item.id}-${index}`} className="border-b border-amber-100 pb-3 last:border-b-0">
-                    <div className="flex items-start justify-between gap-3">
-                      <p className="text-sm font-semibold text-umber">
-                        {index + 1}. {item.product.name}
-                      </p>
-                      <p className="text-sm font-semibold text-umber">RM{(item.price_at_time * item.quantity).toFixed(2)}</p>
-                    </div>
-                    <p className="mt-1 text-xs text-umber/70">Qty: {item.quantity}</p>
+              <div className="rounded-2xl border border-zinc-200 bg-gradient-to-b from-white to-zinc-50 p-4 shadow-sm sm:p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-2xl font-semibold tracking-tight text-zinc-900">Order Summary</h3>
+                    <p className="mt-1 text-sm text-zinc-500">{itemCount} items in your cart</p>
                   </div>
-                ))}
+                  <span className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                    MYR
+                  </span>
+                </div>
+
+                <div className="mt-5 space-y-4">
+                  {cartItems.map((item, index) => (
+                    <div
+                      key={`${item.id}-${index}`}
+                      className="flex items-center justify-between gap-4 border-b border-zinc-200 pb-3 last:border-b-0"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-zinc-900">{item.product.name}</p>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          {item.quantity} x RM{Number(item.price_at_time).toFixed(2)}
+                        </p>
+                      </div>
+                      <p className="shrink-0 text-sm font-semibold text-zinc-900">
+                        RM{(item.price_at_time * item.quantity).toFixed(2)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-5 grid gap-3 sm:grid-cols-[1fr_auto]">
+                  <div className="rounded-xl border border-zinc-200 bg-white px-4 py-3">
+                    <label htmlFor="discount-code" className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                      Discount code
+                    </label>
+                    <input
+                      id="discount-code"
+                      value={discountCode}
+                      onChange={(event) => setDiscountCode(event.target.value)}
+                      placeholder="Enter code"
+                      className="mt-1 w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={applyDiscountCode}
+                    className="min-h-[52px] rounded-xl border border-zinc-200 bg-zinc-100 px-5 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-200"
+                  >
+                    Apply
+                  </button>
+                </div>
+                {discountMessage ? <p className="mt-2 text-xs text-zinc-500">{discountMessage}</p> : null}
+
+                <div className="mt-5 space-y-3 border-t border-zinc-200 pt-4 text-sm">
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-zinc-600">Subtotal</span>
+                    <span className="font-medium text-zinc-900">
+                      RM{subtotal.toFixed(2)} <span className="text-zinc-500">· {itemCount} items</span>
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-2 text-zinc-600">
+                      <span>Shipping</span>
+                      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-zinc-400 text-[11px] font-bold text-zinc-500">
+                        ?
+                      </span>
+                    </div>
+                    <span className="font-medium text-zinc-700">
+                      {addressForm.address1.trim() ? `RM${shippingEstimate.toFixed(2)}` : "Enter shipping address"}
+                    </span>
+                  </div>
+                  {discountAmount > 0 ? (
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="text-zinc-600">Discount</span>
+                      <span className="font-medium text-emerald-700">-RM{discountAmount.toFixed(2)}</span>
+                    </div>
+                  ) : null}
+                  <div className="flex items-center justify-between gap-4 border-t border-zinc-200 pt-3">
+                    <span className="text-lg font-semibold text-zinc-900">Total</span>
+                    <div className="text-right">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">MYR</p>
+                      <p className="text-2xl font-bold tracking-tight text-zinc-900">RM{total.toFixed(2)}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <p className="mt-3 text-xs text-zinc-500">Shipping and tax are confirmed at the next step.</p>
               </div>
-              <div className="mt-5 flex items-center justify-between border-t border-amber-200 pt-4 text-base font-semibold text-umber">
-                <span>Subtotal</span>
-                <span>RM{subtotal.toFixed(2)}</span>
-              </div>
-              <p className="mt-2 text-xs text-umber/70">Shipping and tax calculated at checkout.</p>
               {error ? (
                 <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
               ) : null}

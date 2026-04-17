@@ -20,7 +20,7 @@ async function authenticate(req, _res, next) {
     }
 
     const payload = jwt.verify(token, env.jwt.secret);
-    const user = await userService.findById(payload.sub);
+    const user = await userService.findByIdWithRoles(payload.sub);
 
     if (!user) {
       const error = new Error("User not found.");
@@ -31,9 +31,15 @@ async function authenticate(req, _res, next) {
     req.user = {
       id: user.id,
       email: user.email,
-      role: user.role,
-      name: user.name
+      account_status: user.account_status,
+      roles: Array.isArray(user.roles) ? user.roles : []
     };
+
+    if (["suspended", "deleted"].includes(String(user.account_status || "").toLowerCase())) {
+      const error = new Error("Account is not allowed to access this resource.");
+      error.statusCode = 403;
+      throw error;
+    }
 
     return next();
   } catch (err) {
@@ -49,7 +55,7 @@ async function authenticate(req, _res, next) {
   }
 }
 
-function authorizeRoles(...roles) {
+function authorizeRoles(...allowedRoles) {
   return (req, _res, next) => {
     if (!req.user) {
       const error = new Error("Unauthorized.");
@@ -57,7 +63,9 @@ function authorizeRoles(...roles) {
       return next(error);
     }
 
-    if (!roles.includes(req.user.role)) {
+    const roles = Array.isArray(req.user.roles) ? req.user.roles : [];
+    const hasRole = roles.some((role) => allowedRoles.includes(role));
+    if (!hasRole) {
       const error = new Error("Forbidden: insufficient permissions.");
       error.statusCode = 403;
       return next(error);
@@ -67,7 +75,10 @@ function authorizeRoles(...roles) {
   };
 }
 
+const requireAdmin = authorizeRoles("admin");
+
 module.exports = {
   authenticate,
-  authorizeRoles
+  authorizeRoles,
+  requireAdmin
 };

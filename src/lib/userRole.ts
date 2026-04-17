@@ -24,6 +24,22 @@ export async function resolveProfileRole(
   userId: string | number,
   options: ResolveProfileRoleOptions
 ): Promise<{ role: string | null; error: string | null }> {
+  // Preferred: role mapping tables (roles + user_roles).
+  const byRoleMap = await supabase
+    .from("user_roles")
+    .select("roles(name)")
+    .eq("user_id", userIdForDbQuery(userId))
+    .limit(1)
+    .maybeSingle();
+
+  if (!byRoleMap.error) {
+    const roleObj = (byRoleMap.data as { roles?: { name?: unknown } | null } | null)?.roles;
+    const mappedRole = roleObj && typeof roleObj.name === "string" ? roleObj.name : null;
+    if (mappedRole) {
+      return { role: mappedRole, error: null };
+    }
+  }
+
   const onMissingProfiles = () =>
     options.missingProfiles === "treatAsNoRole"
       ? { role: null as string | null, error: null as string | null }
@@ -40,6 +56,19 @@ export async function resolveProfileRole(
   }
 
   if (isMissingProfilesTable(byUserId.error)) {
+    // Fallback: users.role if role-mapping/profiles are absent.
+    const byUsersRole = await supabase
+      .from("users")
+      .select("role")
+      .eq("id", userIdForDbQuery(userId))
+      .maybeSingle();
+    if (!byUsersRole.error) {
+      const roleValue =
+        byUsersRole.data && typeof (byUsersRole.data as { role?: unknown }).role === "string"
+          ? String((byUsersRole.data as { role: string }).role)
+          : null;
+      if (roleValue) return { role: roleValue, error: null };
+    }
     return onMissingProfiles();
   }
 

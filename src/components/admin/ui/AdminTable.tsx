@@ -18,25 +18,25 @@ export default function AdminTable({
   isEmpty = false,
 }: AdminTableProps) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-zinc-200/90 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_6px_16px_-12px_rgba(15,23,42,0.55)]">
       <div className="overflow-x-auto">
         <table className={`w-full ${minWidthClassName} text-left text-sm`}>
           <thead>
-            <tr className="border-b border-zinc-100 bg-zinc-50/90">
+            <tr className="border-b border-slate-100 bg-slate-50/85">
               {columns.map((column) => (
-                <th key={column} className="px-4 py-3.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                <th key={column} className="px-4 py-3.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                   {column}
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="[&_tr]:transition-colors [&_tr:hover]:bg-zinc-50/90">
+          <tbody className="[&_tr]:transition-colors [&_tr:hover]:bg-slate-50/70">
             {loading
               ? Array.from({ length: loadingRows }).map((_, index) => (
-                  <tr key={index} className="border-b border-zinc-100">
+                  <tr key={index} className="border-b border-slate-100">
                     {columns.map((column) => (
                       <td key={`${column}-${index}`} className="px-4 py-3">
-                        <div className="h-4 w-full animate-pulse rounded bg-zinc-100" />
+                        <div className="h-4 w-full animate-pulse rounded bg-slate-100" />
                       </td>
                     ))}
                   </tr>

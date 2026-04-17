@@ -11,7 +11,7 @@ function validationError(message) {
 }
 
 function validateRegisterInput(req, _res, next) {
-  const { email, password, name } = req.body || {};
+  const { email, password } = req.body || {};
 
   if (!isValidEmail(email)) {
     return next(validationError("Please provide a valid email address."));
@@ -19,10 +19,6 @@ function validateRegisterInput(req, _res, next) {
   if (typeof password !== "string" || password.length < 8) {
     return next(validationError("Password must be at least 8 characters."));
   }
-  if (typeof name !== "string" || name.trim().length < 2) {
-    return next(validationError("Name must be at least 2 characters."));
-  }
-
   return next();
 }
 
@@ -39,7 +35,39 @@ function validateLoginInput(req, _res, next) {
   return next();
 }
 
+function validateCreateUserInput(req, _res, next) {
+  const { email, password } = req.body || {};
+  if (!isValidEmail(email)) {
+    return next(validationError("Please provide a valid email address."));
+  }
+  if (typeof password !== "string" || password.length < 8) {
+    return next(validationError("Password must be at least 8 characters."));
+  }
+  return next();
+}
+
+function validateResetPasswordInput(req, _res, next) {
+  const { email, current_password, new_password } = req.body || {};
+
+  if (!isValidEmail(email)) {
+    return next(validationError("Please provide a valid email address."));
+  }
+  if (typeof current_password !== "string" || current_password.length === 0) {
+    return next(validationError("Current password is required."));
+  }
+  if (typeof new_password !== "string" || new_password.length < 8) {
+    return next(validationError("New password must be at least 8 characters."));
+  }
+  if (new_password === current_password) {
+    return next(validationError("New password must be different from current password."));
+  }
+
+  return next();
+}
+
 module.exports = {
   validateRegisterInput,
-  validateLoginInput
+  validateLoginInput,
+  validateCreateUserInput,
+  validateResetPasswordInput
 };

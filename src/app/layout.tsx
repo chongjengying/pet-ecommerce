@@ -2,8 +2,7 @@ import type { Metadata } from "next";
 import { DM_Sans } from "next/font/google";
 import "./globals.css";
 import { CartProvider } from "@/context/CartContext";
-import Navbar from "@/components/Navbar";
-import Footer from "@/components/Footer";
+import AppChrome from "@/components/AppChrome";
 
 const dmSans = DM_Sans({
   variable: "--font-dm-sans",
@@ -25,9 +24,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${dmSans.variable} font-sans antialiased`}>
         <CartProvider>
-          <Navbar />
-          <main className="min-h-[calc(100vh-4rem)]">{children}</main>
-          <Footer />
+          <AppChrome>{children}</AppChrome>
         </CartProvider>
       </body>
     </html>

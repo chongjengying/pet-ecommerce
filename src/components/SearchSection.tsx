@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ProductsSearch from "@/components/ProductsSearch";
 import ProductCard from "@/components/ProductCard";
 import { Product } from "@/types";
 
 interface SearchSectionProps {
   allProducts: Product[];
+  initialKeyword?: string;
 }
 
 type SortKey = "popular" | "newest" | "price";
@@ -93,8 +94,8 @@ function sortProducts(products: Product[], sortKey: SortKey, orderMap: Map<strin
   return list;
 }
 
-export default function SearchSection({ allProducts }: SearchSectionProps) {
-  const [keyword, setKeyword] = useState("");
+export default function SearchSection({ allProducts, initialKeyword = "" }: SearchSectionProps) {
+  const [keyword, setKeyword] = useState(initialKeyword);
   const [selectedSize, setSelectedSize] = useState("");
   const [selectedColor, setSelectedColor] = useState("");
   const [priceFilter, setPriceFilter] = useState<PriceFilter>("all");
@@ -151,6 +152,10 @@ export default function SearchSection({ allProducts }: SearchSectionProps) {
     () => sortProducts(filteredProducts, sortKey, orderMap),
     [filteredProducts, sortKey, orderMap]
   );
+
+  useEffect(() => {
+    setKeyword(initialKeyword);
+  }, [initialKeyword]);
 
   return (
     <div className="w-full">

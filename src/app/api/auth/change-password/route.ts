@@ -86,10 +86,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Current password is incorrect." }, { status: 401 });
   }
 
-  const { error: updateError } = await supabase
+  const passwordUpdatePayload = {
+    password: newPassword,
+    password_updated_at: new Date().toISOString(),
+  };
+
+  let { error: updateError } = await supabase
     .from("users")
-    .update({ password: newPassword })
+    .update(passwordUpdatePayload)
     .eq("id", userId);
+
+  if (updateError && /password_updated_at/i.test(updateError.message ?? "")) {
+    ({ error: updateError } = await supabase
+      .from("users")
+      .update({ password: newPassword })
+      .eq("id", userId));
+  }
 
   if (updateError) {
     return NextResponse.json({ error: updateError.message || "Could not update password." }, { status: 400 });

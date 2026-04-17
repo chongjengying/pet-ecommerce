@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 import { ADMIN_SESSION_COOKIE } from "@/lib/adminSession";
-import { createCustomerJwt, CUSTOMER_SESSION_COOKIE, CUSTOMER_SESSION_MAX_AGE_SEC } from "@/lib/customerJwt";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
 import { userIdForDbQuery } from "@/lib/userIdDb";
+import {
+  buildEmailVerificationLink,
+  issueEmailVerificationToken,
+  sendEmailVerificationMail,
+} from "@/lib/emailVerification";
 
 type RegisterBody = {
   email?: string;
@@ -111,6 +115,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: createError?.message || "Could not create user." }, { status: 400 });
   }
 
+  const verification = await issueEmailVerificationToken(supabase, created.id, { markUnverified: true });
+  if (verification.error || !verification.token) {
+    return NextResponse.json(
+      { error: verification.error || "Could not initialize email verification." },
+      { status: 500 }
+    );
+  }
+  const verificationLink = buildEmailVerificationLink(request, verification.token, created.email);
+  const verificationEmail = await sendEmailVerificationMail({
+    toEmail: created.email,
+    toName: created.full_name ?? created.username ?? null,
+    verificationLink,
+    expiresAt: verification.expiresAt,
+  });
+
   const profilePayload = {
     user_id: userIdForDbQuery(created.id),
     username: created.username,
@@ -130,39 +149,27 @@ export async function POST(request: Request) {
     }
   }
 
-  let token = "";
-  try {
-    token = await createCustomerJwt({
-      id: created.id,
-      email: created.email,
-      username: created.username,
-      fullName: created.full_name,
-      role: created.role ?? "customer",
-    });
-  } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Auth API is not configured." },
-      { status: 503 }
-    );
-  }
-
   const response = NextResponse.json({
     success: true,
-    token,
+    emailVerification: {
+      isEmailVerified: false,
+      verificationEmailSent: verificationEmail.sent,
+      message: verificationEmail.sent
+        ? "Check your email to verify your account."
+        : "Account created, but verification email could not be sent. Use resend verification email from the banner.",
+    },
+    nextStep: {
+      path: "/auth/verify-email",
+      requiresEmailVerification: true,
+    },
     user: {
       id: String(created.id),
       email: created.email,
       username: created.username,
       full_name: created.full_name ?? null,
       role: created.role ?? "customer",
+      isEmailVerified: false,
     },
-  });
-  response.cookies.set(CUSTOMER_SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: CUSTOMER_SESSION_MAX_AGE_SEC,
   });
   response.cookies.set(ADMIN_SESSION_COOKIE, "", {
     httpOnly: true,

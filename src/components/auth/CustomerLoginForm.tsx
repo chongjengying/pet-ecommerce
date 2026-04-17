@@ -4,6 +4,16 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { clearProfileCache } from "@/lib/profileCache";
+import { setAuthFlash } from "@/lib/authFlash";
+
+function formatRetryAfter(seconds: number): string {
+  const safeSeconds = Math.max(1, Math.ceil(seconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainder = safeSeconds % 60;
+  if (minutes <= 0) return `${remainder} seconds`;
+  if (remainder === 0) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  return `${minutes} minute${minutes === 1 ? "" : "s"} ${remainder} second${remainder === 1 ? "" : "s"}`;
+}
 
 export default function CustomerLoginForm() {
   const router = useRouter();
@@ -34,8 +44,37 @@ export default function CustomerLoginForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ identifier: normalizedIdentifier, password }),
       });
-      const payload = (await res.json().catch(() => ({}))) as { error?: string; token?: string };
+      const payload = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        token?: string;
+        email?: string;
+        remainingAttempts?: number;
+        retryAfterSeconds?: number;
+        temporarilyBlocked?: boolean;
+        requiresEmailVerification?: boolean;
+        user?: { isEmailVerified?: boolean; email?: string };
+        emailVerification?: { message?: string };
+      };
       if (!res.ok) {
+        if (res.status === 403 && payload.requiresEmailVerification) {
+          const pendingEmail = encodeURIComponent(payload.email || payload.user?.email || normalizedIdentifier);
+          setAuthFlash(payload.emailVerification?.message || "Check your email to verify your account.", "info");
+          router.replace(`/auth/verify-email?email=${pendingEmail}&source=login`);
+          router.refresh();
+          return;
+        }
+        if (payload.temporarilyBlocked && typeof payload.retryAfterSeconds === "number") {
+          setError(`Too many failed attempts. Please wait ${formatRetryAfter(payload.retryAfterSeconds)} and try again.`);
+          return;
+        }
+        if (res.status === 401 && typeof payload.remainingAttempts === "number") {
+          setError(
+            payload.remainingAttempts > 0
+              ? `Wrong password or account. ${payload.remainingAttempts} attempt${payload.remainingAttempts === 1 ? "" : "s"} left before block.`
+              : "Too many failed attempts. Account is temporarily blocked."
+          );
+          return;
+        }
         setError(payload.error || "Login failed. Please try again.");
         return;
       }
@@ -44,6 +83,11 @@ export default function CustomerLoginForm() {
         clearProfileCache();
         localStorage.setItem("customer_jwt_token", payload.token);
         window.dispatchEvent(new Event("customer-auth-changed"));
+      }
+      if (payload.user?.isEmailVerified === false) {
+        setAuthFlash(payload.emailVerification?.message || "Check your email to verify your account.", "info");
+      } else {
+        setAuthFlash("Signed in successfully. Welcome back!", "success");
       }
 
       router.replace(redirectTo);

@@ -8,17 +8,12 @@ import {
   isCompleteShippingAddress,
 } from "@/lib/userAddressDb";
 import { userIdForDbQuery } from "@/lib/userIdDb";
-import { finalizeCartAfterCheckout } from "@/lib/cartDb";
+import { finalizeCartAfterCheckout, getCartView } from "@/lib/cartDb";
 import { decrementStock } from "@/services/productService";
 import { createOrder } from "@/services/orderService";
+import { createPayment } from "@/services/paymentService";
 import { sendCheckoutEmailNotification } from "@/lib/emailNotifications";
-
-type CartItemPayload = {
-  id: string | number;
-  quantity: number;
-  name?: string;
-  price?: number;
-};
+import { readEmailVerificationStatus } from "@/lib/emailVerification";
 
 type CheckoutAddressPayload = {
   country?: unknown;
@@ -32,6 +27,8 @@ type CheckoutAddressPayload = {
   phone?: unknown;
 };
 
+type CheckoutPaymentMethod = "adaptis_gateway" | "grab" | "bank_transfer";
+
 function cleanText(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -42,6 +39,21 @@ function normalizeQty(value: unknown): number {
   const n = Number(value);
   if (!Number.isFinite(n)) return 0;
   return Math.max(1, Math.floor(n));
+}
+
+function normalizeDbId(value: string | number): string | number {
+  const raw = String(value).trim();
+  if (/^\d+$/.test(raw)) {
+    const numeric = Number(raw);
+    if (Number.isFinite(numeric)) return numeric;
+  }
+  return raw;
+}
+
+function buildCheckoutReference(orderNumber: string | null, orderId: string | null) {
+  const base = (orderNumber ?? orderId ?? "").replace(/[^a-zA-Z0-9]/g, "").slice(-10).toUpperCase();
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  return `PAY-${base || "ORDER"}-${stamp}`;
 }
 
 async function resolveCheckoutOrderUserId(
@@ -92,6 +104,19 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+  const verificationStatus = await readEmailVerificationStatus(supabase, resolvedUser.id);
+  if (verificationStatus.error) {
+    return NextResponse.json({ error: verificationStatus.error }, { status: 400 });
+  }
+  if (verificationStatus.configured && !verificationStatus.isEmailVerified) {
+    return NextResponse.json(
+      {
+        error:
+          "Check your email to verify your account before checkout. Use 'Resend verification email' from the banner if needed.",
+      },
+      { status: 403 }
+    );
+  }
   const orderUserId = await resolveCheckoutOrderUserId(supabase, session, resolvedUser.id);
 
   const addresses = await fetchUserAddresses(supabase, resolvedUser.id);
@@ -111,40 +136,97 @@ export async function POST(request: Request) {
     body = await request.json();
   } catch {
     return NextResponse.json(
-      { error: "Invalid request body. Send JSON with an 'items' array." },
+      { error: "Invalid request body. Send JSON." },
       { status: 400 }
     );
   }
 
-  const items = (body as { items?: unknown })?.items as CartItemPayload[] | undefined;
   const shippingAddress = ((body as { shipping_address?: unknown })?.shipping_address ?? null) as CheckoutAddressPayload | null;
   const billingAddress = ((body as { billing_address?: unknown })?.billing_address ?? null) as CheckoutAddressPayload | null;
   const billingSameAsShipping = Boolean((body as { billing_same_as_shipping?: unknown })?.billing_same_as_shipping ?? true);
-  if (!Array.isArray(items) || items.length === 0) {
+  const paymentMethod = String((body as { payment_method?: unknown })?.payment_method ?? "adaptis_gateway").trim() as CheckoutPaymentMethod;
+  const cartViewResult = await getCartView(supabase, userIdForDbQuery(resolvedUser.id));
+  if (cartViewResult.error || !cartViewResult.data) {
     return NextResponse.json(
-      { error: "Cart is empty or invalid payload. Expected { items: [{ id, quantity, name?, price? }] }." },
+      { error: cartViewResult.error?.message || "Could not load cart for checkout." },
+      { status: 400 }
+    );
+  }
+  if (!Array.isArray(cartViewResult.data.items) || cartViewResult.data.items.length === 0) {
+    return NextResponse.json(
+      { error: "Your cart is empty. Add items before checkout." },
       { status: 400 }
     );
   }
 
-  const validItems = items.filter(
-    (item) =>
-      item?.id != null &&
-      normalizeQty(item?.quantity) > 0
-  );
-  if (validItems.length === 0) {
-    return NextResponse.json(
-      { error: "No valid items. Each item needs id and quantity > 0." },
-      { status: 400 }
-    );
-  }
-
-  const orderItems = validItems.map((item) => ({
-    id: item.id,
+  const orderItems = cartViewResult.data.items.map((item) => ({
+    id: item.product_id,
     quantity: normalizeQty(item.quantity),
-    name: item.name ?? "Product",
-    price: Number.isFinite(Number(item.price)) ? Number(item.price) : 0,
+    name: item.product?.name ?? "Product",
+    price: Number.isFinite(Number(item.price_at_time)) ? Number(item.price_at_time) : 0,
   }));
+
+  const paymentMethodConfig: Record<CheckoutPaymentMethod, { payment_method: string; provider: string; note: string }> = {
+    adaptis_gateway: {
+      payment_method: "Gateway Redirect",
+      provider: "adaptis",
+      note: "Customer will be redirected to ADAPTIS Payment Gateway (formerly iPay88).",
+    },
+    grab: {
+      payment_method: "Buy Now Pay Later",
+      provider: "grab",
+      note: "Customer selected Grab payment flow.",
+    },
+    bank_transfer: {
+      payment_method: "Bank Transfer / Cash Deposit",
+      provider: "bank_transfer",
+      note: "Customer selected offline transfer / cash deposit flow.",
+    },
+  };
+  const selectedPaymentMethod = paymentMethodConfig[paymentMethod] ?? paymentMethodConfig.adaptis_gateway;
+  const paymentStatus = "pending";
+
+  const uniqueProductIds = Array.from(new Set(orderItems.map((item) => String(item.id).trim()).filter(Boolean)));
+  if (uniqueProductIds.length === 0) {
+    return NextResponse.json({ error: "Your cart is empty. Add items before checkout." }, { status: 400 });
+  }
+
+  const { data: stockRows, error: stockError } = await supabase
+    .from("products")
+    .select("id,stock")
+    .in("id", uniqueProductIds.map((id) => normalizeDbId(id)));
+  if (stockError) {
+    return NextResponse.json({ error: stockError.message || "Could not validate stock." }, { status: 400 });
+  }
+
+  const stockByProductId = new Map<string, number | null>();
+  for (const row of Array.isArray(stockRows) ? stockRows : []) {
+    const id = String((row as { id?: unknown }).id ?? "").trim();
+    if (!id) continue;
+    const stockValue = Number((row as { stock?: unknown }).stock);
+    stockByProductId.set(id, Number.isFinite(stockValue) ? Math.max(0, Math.floor(stockValue)) : null);
+  }
+
+  const unavailableItems = orderItems.reduce<Array<{ id: string; requested: number; available: number }>>(
+    (acc, item) => {
+      const productId = String(item.id);
+      const available = stockByProductId.get(productId);
+      if (available == null || item.quantity <= available) return acc;
+      acc.push({ id: productId, requested: item.quantity, available });
+      return acc;
+    },
+    []
+  );
+
+  if (unavailableItems.length > 0) {
+    return NextResponse.json(
+      {
+        error: "Some items are no longer in stock with your requested quantity. Please update your cart and retry.",
+        unavailable_items: unavailableItems,
+      },
+      { status: 409 }
+    );
+  }
 
   const subtotal = orderItems.reduce(
     (sum, item) => sum + (Number(item.price) || 0) * (item.quantity || 0),
@@ -167,12 +249,13 @@ export async function POST(request: Request) {
   try {
     createdOrder = await createOrder(orderItems, {
       user_id: orderUserId,
+      status: "pending",
       subtotal,
       shipping_fee: 0,
       tax_amount: 0,
       discount: 0,
       currency: "MYR",
-      payment_status: "paid",
+      payment_status: paymentStatus,
       shipping_method: "free_shipping",
       tracking_number: null,
       shipping_name: shippingRecipientName,
@@ -183,6 +266,14 @@ export async function POST(request: Request) {
       shipping_state: shippingState,
       shipping_postal_code: shippingPostalCode,
       shipping_country: shippingCountry,
+      payment_method_code: paymentMethod,
+      payment_provider: selectedPaymentMethod.provider,
+      payment_snapshot: {
+        method: paymentMethod,
+        provider: selectedPaymentMethod.provider,
+        label: selectedPaymentMethod.payment_method,
+        note: selectedPaymentMethod.note,
+      },
       metadata: {
         customer: {
           auth_sub: String(session.sub),
@@ -196,7 +287,7 @@ export async function POST(request: Request) {
           full_name: resolvedUser.full_name ?? null,
           phone: shippingPhone,
         },
-        item_count: orderItems.length,
+        item_count: orderItems.reduce((sum, item) => sum + item.quantity, 0),
         shipping: {
           label: shipTo.label,
           first_name: shippingFirstName,
@@ -226,6 +317,12 @@ export async function POST(request: Request) {
               postal_code: billingAddress?.postal_code ? String(billingAddress.postal_code) : null,
               country: billingAddress?.country ? String(billingAddress.country) : null,
             },
+        payment: {
+          method: paymentMethod,
+          provider: selectedPaymentMethod.provider,
+          label: selectedPaymentMethod.payment_method,
+          note: selectedPaymentMethod.note,
+        },
       },
     });
   } catch (orderErr) {
@@ -250,8 +347,8 @@ export async function POST(request: Request) {
 
   // 2) Then deduct inventory
   try {
-    for (const item of validItems) {
-      await decrementStock(item.id, normalizeQty(item.quantity), {
+    for (const item of orderItems) {
+      await decrementStock(item.id, item.quantity, {
         order_id: createdOrder?.id ?? null,
         order_number: createdOrder?.order_number ?? null,
         note: `Checkout order ${createdOrder?.order_number ?? createdOrder?.id ?? ""}`.trim(),
@@ -303,6 +400,39 @@ export async function POST(request: Request) {
       order_id: createdOrder?.id ?? null,
       order_number: createdOrder?.order_number ?? null,
       error: emailResult.error ?? "Unknown email error",
+    });
+  }
+
+  // 3) Record payment transaction (non-blocking for checkout success).
+  try {
+      const orderId = createdOrder?.id ?? null;
+      if (orderId) {
+        const referenceNo = buildCheckoutReference(createdOrder?.order_number ?? null, orderId);
+        const transactionId = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : referenceNo;
+        await createPayment({
+          order_id: orderId,
+          user_id: orderUserId,
+          transaction_id: transactionId,
+          reference_no: referenceNo,
+          payment_method: selectedPaymentMethod.payment_method,
+          provider: selectedPaymentMethod.provider,
+          amount: subtotal,
+          currency: "MYR",
+          status: paymentStatus,
+          paid_at: null,
+          review_status: "pending",
+          metadata: {
+            source: "checkout_api",
+            order_number: createdOrder?.order_number ?? null,
+            customer_email: accountEmail,
+            selected_payment_method: paymentMethod,
+          },
+        });
+      }
+  } catch (paymentErr) {
+    console.warn("[api/checkout POST] Payment insert failed after order success", {
+      order_id: createdOrder?.id ?? null,
+      error: paymentErr instanceof Error ? paymentErr.message : String(paymentErr),
     });
   }
 

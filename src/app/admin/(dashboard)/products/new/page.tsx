@@ -1,6 +1,7 @@
 import Link from "next/link";
 import AdminProductForm from "@/components/admin/AdminProductForm";
 import { getProducts } from "@/services/productService";
+import AdminPageHeader from "@/components/admin/ui/AdminPageHeader";
 
 const defaultCategories = ["Food", "Treats", "Supplements", "Accessories", "Grooming"];
 
@@ -16,16 +17,17 @@ export default async function AdminNewProductPage() {
   ) as string[];
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 md:text-3xl">Add Product</h1>
-          <p className="mt-1 text-sm text-zinc-600">Create a complete product profile for your catalog.</p>
-        </div>
-        <Link href="/admin/products" className="text-sm font-medium text-zinc-600 hover:text-zinc-900">
-          Back to Products
-        </Link>
-      </div>
+    <div className="space-y-6">
+      <AdminPageHeader
+        eyebrow="Catalog"
+        title="Add Product"
+        description="Create a complete product profile for your catalog."
+        actions={
+          <Link href="/admin/products" className="text-sm font-medium text-cyan-700 hover:text-cyan-800">
+            Back to Products
+          </Link>
+        }
+      />
       <AdminProductForm mode="create" categoryOptions={categoryOptions} />
     </div>
   );

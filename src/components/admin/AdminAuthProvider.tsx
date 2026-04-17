@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { setAuthFlash } from "@/lib/authFlash";
 
 type AdminProfile = {
   username: string | null;
@@ -86,6 +87,7 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // ignore
     }
+    setAuthFlash("Signed out from admin console successfully.", "success");
     setProfile(null);
     setLoading(false);
     router.replace("/admin/login");

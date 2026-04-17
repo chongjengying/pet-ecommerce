@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useCart } from "@/context/CartContext";
 import { getAvatarInitials, UserAvatar } from "@/components/ui/UserAvatar";
-import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { clearProfileCache } from "@/lib/profileCache";
+import { consumeAuthFlash, setAuthFlash, type AuthFlashTone } from "@/lib/authFlash";
 
 /**
  * Edit this object to change header links and labels — same idea as `footerConfig` in `Footer.tsx`.
@@ -22,7 +23,7 @@ export const headerConfig = {
   },
   navLinks: [
     { href: "/", label: "Home" },
-    { href: "/products", label: "Products" },
+    { href: "/products", label: "Categories" },
     { href: "/grooming", label: "Grooming" },
   ],
   auth: {
@@ -54,15 +55,24 @@ function CartIcon({ className }: { className?: string }) {
 export default function Navbar() {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { cartCount, openCartFlyout } = useCart();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
   const [logoBroken, setLogoBroken] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [username, setUsername] = useState<string>("");
   const [fullName, setFullName] = useState<string>("");
   const [email, setEmail] = useState<string>("");
+  const [isEmailVerified, setIsEmailVerified] = useState(true);
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendMessage, setResendMessage] = useState<string | null>(null);
+  const [resendMessageTone, setResendMessageTone] = useState<AuthFlashTone>("info");
+  const [resendBlockedUntil, setResendBlockedUntil] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [flashMessage, setFlashMessage] = useState<string | null>(null);
+  const [flashTone, setFlashTone] = useState<AuthFlashTone>("success");
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   const cleanDisplayName = (value: string): string =>
@@ -80,6 +90,8 @@ export default function Navbar() {
         const token = typeof window !== "undefined" ? localStorage.getItem("customer_jwt_token") : null;
         const res = await fetch("/api/auth/me", {
           method: "GET",
+          cache: "no-store",
+          credentials: "same-origin",
           headers: {
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
@@ -90,21 +102,24 @@ export default function Navbar() {
           setUsername("");
           setFullName("");
           setEmail("");
+          setIsEmailVerified(true);
           return;
         }
         const payload = (await res.json().catch(() => ({}))) as {
-          user?: { username?: string; full_name?: string | null; email?: string };
+          user?: { username?: string; full_name?: string | null; email?: string; isEmailVerified?: boolean };
         };
         setIsAuthenticated(true);
         setUsername(payload.user?.username ?? "");
         setFullName(payload.user?.full_name ?? "");
         setEmail(payload.user?.email ?? "");
+        setIsEmailVerified(payload.user?.isEmailVerified !== false);
       } catch {
         if (!active) return;
         setIsAuthenticated(false);
         setUsername("");
         setFullName("");
         setEmail("");
+        setIsEmailVerified(true);
       } finally {
         if (!active) return;
         setAuthLoading(false);
@@ -120,16 +135,50 @@ export default function Navbar() {
         void syncAuthState();
       }
     };
+    const onWindowFocus = () => {
+      void syncAuthState();
+    };
 
     window.addEventListener("customer-auth-changed", onAuthChanged);
     window.addEventListener("storage", onStorage);
+    window.addEventListener("focus", onWindowFocus);
 
     return () => {
       active = false;
       window.removeEventListener("customer-auth-changed", onAuthChanged);
       window.removeEventListener("storage", onStorage);
+      window.removeEventListener("focus", onWindowFocus);
     };
   }, []);
+
+  useEffect(() => {
+    const flash = consumeAuthFlash();
+    if (!flash) return;
+    setFlashMessage(flash.message);
+    setFlashTone(flash.tone);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (pathname !== "/products") return;
+    setSearchTerm(searchParams.get("q") ?? "");
+  }, [pathname, searchParams]);
+
+  useEffect(() => {
+    if (!flashMessage) return;
+    const timer = window.setTimeout(() => {
+      setFlashMessage(null);
+    }, 3500);
+    return () => window.clearTimeout(timer);
+  }, [flashMessage]);
+
+  useEffect(() => {
+    if (resendBlockedUntil <= Date.now()) return;
+    const msUntilUnblock = resendBlockedUntil - Date.now();
+    const timer = window.setTimeout(() => {
+      setResendBlockedUntil(0);
+    }, msUntilUnblock);
+    return () => window.clearTimeout(timer);
+  }, [resendBlockedUntil]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -149,17 +198,73 @@ export default function Navbar() {
   }, []);
 
   const onLogout = async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
+    await fetch("/api/auth/logout", { method: "POST", cache: "no-store", credentials: "same-origin" });
     clearProfileCache();
     localStorage.removeItem("customer_jwt_token");
     window.dispatchEvent(new Event("customer-auth-changed"));
+    setAuthFlash("Signed out. Please sign in again to continue.", "info");
     setIsAuthenticated(false);
     setUsername("");
     setFullName("");
     setEmail("");
+    setIsEmailVerified(true);
     setMenuOpen(false);
-    router.replace("/");
+    setMobileOpen(false);
+    router.replace("/auth/login");
     router.refresh();
+  };
+
+  const onResendVerificationEmail = async () => {
+    if (resendBlockedUntil > Date.now()) {
+      setResendMessageTone("error");
+      setResendMessage("You've requested verification too many times. Please wait a few minutes before trying again.");
+      return;
+    }
+
+    setResendMessage(null);
+    setResendLoading(true);
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("customer_jwt_token") : null;
+      const response = await fetch("/api/auth/verification/resend", {
+        method: "POST",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        success?: boolean;
+        message?: string;
+        error?: string;
+        alreadyVerified?: boolean;
+        retryAfterSeconds?: number;
+      };
+      if (!response.ok || !payload.success) {
+        if (response.status === 429) {
+          const retryAfterSeconds =
+            typeof payload.retryAfterSeconds === "number" ? Math.max(1, payload.retryAfterSeconds) : 300;
+          setResendBlockedUntil(Date.now() + retryAfterSeconds * 1000);
+          setResendMessageTone("error");
+          setResendMessage("You've requested verification too many times. Please wait a few minutes before trying again.");
+          return;
+        }
+        setResendMessageTone("error");
+        setResendMessage(payload.error || "Could not resend verification email.");
+        return;
+      }
+      if (payload.alreadyVerified) {
+        setIsEmailVerified(true);
+        setResendMessageTone("success");
+        setResendMessage(payload.message || "Email is already verified.");
+        return;
+      }
+      setResendMessageTone("success");
+      setResendMessage(payload.message || "Verification email sent. Please check your inbox.");
+    } catch {
+      setResendMessageTone("error");
+      setResendMessage("Could not resend verification email. Please try again.");
+    } finally {
+      setResendLoading(false);
+    }
   };
 
   const displayName = useMemo(() => {
@@ -192,8 +297,59 @@ export default function Navbar() {
     );
   };
 
+  const onSearchSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const query = searchTerm.trim();
+    const destination = query ? `/products?q=${encodeURIComponent(query)}` : "/products";
+    router.push(destination);
+    setMobileOpen(false);
+  };
+
   return (
     <header className="sticky top-0 z-50 w-full border-b border-amber-200/80 bg-gradient-to-b from-cream via-cream to-amber-50/40 backdrop-blur supports-[backdrop-filter]:bg-cream/90">
+      {!authLoading && isAuthenticated && !isEmailVerified ? (
+        <div className="border-b border-amber-200 bg-amber-50/90">
+          <div className="mx-auto flex w-full max-w-6xl flex-col gap-2 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+            <p className="text-sm font-medium text-amber-900">Check your email to verify your account.</p>
+            <button
+              type="button"
+              onClick={() => void onResendVerificationEmail()}
+              disabled={resendLoading || resendBlockedUntil > Date.now()}
+              className="inline-flex min-h-[36px] items-center justify-center rounded-xl border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {resendLoading ? "Sending..." : "Resend verification email"}
+            </button>
+          </div>
+          {resendMessage ? (
+            <div
+              className={`mx-auto mb-2 w-full max-w-6xl rounded-xl border px-3 py-2 text-xs sm:px-6 ${
+                resendMessageTone === "error"
+                  ? "border-red-200 bg-red-50 text-red-700"
+                  : resendMessageTone === "info"
+                    ? "border-sky-200 bg-sky-50 text-sky-700"
+                    : "border-emerald-200 bg-emerald-50 text-emerald-800"
+              }`}
+              role="status"
+            >
+              {resendMessage}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {flashMessage ? (
+        <div
+          className={`mx-auto mt-2 w-[min(92%,560px)] rounded-2xl border px-4 py-2.5 text-center text-sm font-medium shadow-sm ${
+            flashTone === "error"
+              ? "border-red-200 bg-red-50 text-red-700"
+              : flashTone === "info"
+                ? "border-sky-200 bg-sky-50 text-sky-700"
+                : "border-emerald-200 bg-emerald-50 text-emerald-800"
+          }`}
+          role="status"
+        >
+          {flashMessage}
+        </div>
+      ) : null}
       <nav
         className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3.5 sm:px-6"
         aria-label="Primary"
@@ -216,6 +372,41 @@ export default function Navbar() {
           )}
           <span className="truncate text-lg font-bold tracking-[0.08em] sm:text-xl">{headerConfig.brand.name}</span>
         </Link>
+
+        <form
+          onSubmit={onSearchSubmit}
+          className="hidden w-full max-w-md items-center overflow-hidden rounded-full border border-amber-200/80 bg-white/95 shadow-sm ring-1 ring-transparent transition focus-within:border-sage/40 focus-within:ring-sage/20 lg:flex"
+          role="search"
+          aria-label="Search products"
+        >
+          <label htmlFor="header-search" className="sr-only">
+            Search products
+          </label>
+          <span className="pl-4 text-umber/50" aria-hidden="true">
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+              />
+            </svg>
+          </span>
+          <input
+            id="header-search"
+            type="search"
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            placeholder="Search pet products"
+            className="min-w-0 flex-1 border-0 bg-transparent px-3 py-2.5 text-sm text-umber placeholder:text-umber/45 focus:outline-none"
+          />
+          <button
+            type="submit"
+            className="mr-1.5 rounded-full bg-sage/90 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sage"
+          >
+            Search
+          </button>
+        </form>
 
         {/* Desktop nav */}
         <ul className="hidden items-center gap-1 md:flex">
@@ -367,6 +558,40 @@ export default function Navbar() {
       {/* Mobile panel */}
       {mobileOpen && (
         <div className="border-t border-amber-200/70 bg-gradient-to-b from-cream to-amber-50/30 px-4 py-4 md:hidden">
+          <form
+            onSubmit={onSearchSubmit}
+            className="mb-3 flex items-center overflow-hidden rounded-xl border border-amber-200/80 bg-white shadow-sm ring-1 ring-transparent focus-within:border-sage/40 focus-within:ring-sage/20"
+            role="search"
+            aria-label="Search products"
+          >
+            <label htmlFor="header-search-mobile" className="sr-only">
+              Search products
+            </label>
+            <span className="pl-3 text-umber/50" aria-hidden="true">
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                />
+              </svg>
+            </span>
+            <input
+              id="header-search-mobile"
+              type="search"
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder="Search pet products"
+              className="min-w-0 flex-1 border-0 bg-transparent px-3 py-2.5 text-sm text-umber placeholder:text-umber/45 focus:outline-none"
+            />
+            <button
+              type="submit"
+              className="mr-1.5 rounded-lg bg-sage/90 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-sage"
+            >
+              Go
+            </button>
+          </form>
           <ul className="flex flex-col gap-1">
             {headerConfig.navLinks.map(({ href, label }) => (
               <li key={href}>

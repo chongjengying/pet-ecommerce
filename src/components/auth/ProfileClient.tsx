@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -8,6 +9,7 @@ import {
   writeProfileCache,
   type ProfileAddress,
 } from "@/lib/profileCache";
+import { setAuthFlash } from "@/lib/authFlash";
 import ProfileSkeleton from "@/components/auth/ProfileSkeleton";
 import { getAvatarInitials, UserAvatar } from "@/components/ui/UserAvatar";
 
@@ -199,6 +201,7 @@ export default function ProfileClient({
     clearProfileCache();
     localStorage.removeItem("customer_jwt_token");
     window.dispatchEvent(new Event("customer-auth-changed"));
+    setAuthFlash("Signed out successfully.", "success");
     router.replace("/");
     router.refresh();
   };
@@ -321,6 +324,11 @@ export default function ProfileClient({
       contactReady: hasValue(user.full_name) && hasValue(user.phone),
     };
   }, [shippingAddress, user]);
+  const heroChips = [
+    { label: "Saved addresses", value: savedAddressCount.toString() },
+    { label: "Checkout ready", value: readiness.checkoutReady ? "Yes" : "No" },
+    { label: "Profile status", value: readiness.contactReady ? "Active" : "Needs update" },
+  ];
 
   if (loading && !user) {
     return <ProfileSkeleton />;
@@ -362,6 +370,52 @@ export default function ProfileClient({
                 <dd className="font-medium text-umber">{user.email || "--"}</dd>
               </div>
             </dl>
+          </div>
+        </div>
+
+        <div className="mt-7 grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
+          <div className="rounded-[2rem] border border-white/80 bg-white/90 p-5 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-umber/45">Customer dashboard</p>
+                <p className="mt-2 text-base font-semibold text-umber">A quick view of your account health</p>
+              </div>
+              <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${statusTone(readiness.checkoutReady)}`}>
+                {readiness.checkoutReady ? "Checkout ready" : "Needs address"}
+              </span>
+            </div>
+
+            <div className="mt-5 grid gap-3 sm:grid-cols-3">
+              {heroChips.map((chip) => (
+                <div key={chip.label} className="rounded-2xl border border-amber-100/90 bg-cream/55 px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-umber/45">{chip.label}</p>
+                  <p className="mt-1 text-sm font-semibold text-umber">{chip.value}</p>
+                </div>
+              ))}
+            </div>
+
+            <p className="mt-4 text-sm leading-6 text-umber/62">
+              Keep your profile details up to date so delivery, checkout, and order follow-up stay smooth.
+            </p>
+          </div>
+
+          <div className="overflow-hidden rounded-[2rem] border border-white/80 bg-white shadow-[0_18px_40px_-24px_rgba(44,36,32,0.45)]">
+            <div className="flex items-center justify-between border-b border-amber-100 px-5 py-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-umber/45">Pet image</p>
+                <p className="mt-1 text-sm font-semibold text-umber">Pawluxe companion</p>
+              </div>
+              <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">Live</span>
+            </div>
+            <div className="relative aspect-[4/3] bg-[radial-gradient(circle_at_top,rgba(250,219,170,0.55),rgba(255,255,255,1)_58%)]">
+              <Image
+                src="/logo.png"
+                alt="Pawluxe pet brand image"
+                fill
+                priority
+                className="object-contain p-8"
+              />
+            </div>
           </div>
         </div>
 

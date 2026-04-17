@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useCallback, useEffect, startTransition } from "react";
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef, startTransition } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { Product, CartItem } from "@/types";
@@ -133,6 +133,8 @@ function getStockLimit(item: Pick<Product, "stock"> | Pick<CartItem, "stock">): 
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);
   const [flyoutOpen, setFlyoutOpen] = useState(false);
+  const flyoutContainerRef = useRef<HTMLDivElement | null>(null);
+  const lastFocusedElementRef = useRef<HTMLElement | null>(null);
 
   const refreshFromServer = useCallback(async () => {
     try {
@@ -264,6 +266,25 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const openCartFlyout = useCallback(() => setFlyoutOpen(true), []);
   const closeCartFlyout = useCallback(() => setFlyoutOpen(false), []);
 
+  useEffect(() => {
+    if (flyoutOpen) {
+      const active = document.activeElement;
+      lastFocusedElementRef.current = active instanceof HTMLElement ? active : null;
+      return;
+    }
+
+    const container = flyoutContainerRef.current;
+    const active = document.activeElement;
+    if (container && active instanceof HTMLElement && container.contains(active)) {
+      active.blur();
+    }
+
+    const previous = lastFocusedElementRef.current;
+    if (previous && document.contains(previous)) {
+      previous.focus();
+    }
+  }, [flyoutOpen]);
+
   const removeFromCart = useCallback((productId: string) => {
     const id = String(productId);
     let optimisticItems: CartItem[] = [];
@@ -285,6 +306,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
             setItems(nextItems);
           });
           persistCartSnapshot(nextItems);
+          window.dispatchEvent(new Event("cart-changed"));
           return;
         }
       } catch {
@@ -341,6 +363,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
               setItems(nextItems);
             });
             persistCartSnapshot(nextItems);
+            window.dispatchEvent(new Event("cart-changed"));
             return;
           }
           void refreshFromServer();
@@ -365,6 +388,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
             setItems(nextItems);
           });
           persistCartSnapshot(nextItems);
+          window.dispatchEvent(new Event("cart-changed"));
           return;
         }
       } catch {
@@ -398,8 +422,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       {children}
       {/* Cart flyout overlay */}
       <div
+        ref={flyoutContainerRef}
         className={`fixed inset-0 z-[100] transition-opacity duration-300 ${flyoutOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
-        aria-hidden={!flyoutOpen}
+        inert={!flyoutOpen}
       >
         <button
           type="button"

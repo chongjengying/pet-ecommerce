@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { clearProfileCache } from "@/lib/profileCache";
+import { setAuthFlash } from "@/lib/authFlash";
 
 export default function CustomerSignupForm() {
   const router = useRouter();
@@ -54,21 +54,29 @@ export default function CustomerSignupForm() {
           fullName: trimmedFullName,
         }),
       });
-      const payload = (await res.json().catch(() => ({}))) as { error?: string; token?: string };
+      const payload = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        user?: { email?: string };
+        nextStep?: { path?: string };
+        emailVerification?: {
+          verificationEmailSent?: boolean;
+          message?: string;
+        };
+      };
 
       if (!res.ok) {
         setError(payload.error || "Sign up failed. Please try again.");
         return;
       }
 
-      if (payload.token) {
-        clearProfileCache();
-        localStorage.setItem("customer_jwt_token", payload.token);
-        window.dispatchEvent(new Event("customer-auth-changed"));
-      }
-
-      setMessage("Account created. Add your shipping address in Address Book next.");
-      router.replace("/profile?setup=1");
+      const verificationMessage =
+        payload.emailVerification?.message ||
+        "Account created. Check your email to verify your account.";
+      setMessage(verificationMessage);
+      setAuthFlash(verificationMessage, payload.emailVerification?.verificationEmailSent ? "success" : "info");
+      const emailParam = encodeURIComponent(payload.user?.email || normalizedEmail);
+      const nextPath = payload.nextStep?.path || "/auth/verify-email";
+      router.replace(`${nextPath}?email=${emailParam}&source=signup`);
       router.refresh();
     } catch {
       setError("Sign up failed. Please try again.");

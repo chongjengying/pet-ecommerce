@@ -7,6 +7,8 @@ import type { Product } from "@/types";
 import { resolveProductImageUrl } from "@/lib/productImage";
 import AdminTable from "@/components/admin/ui/AdminTable";
 import AdminModal from "@/components/admin/ui/AdminModal";
+import AdminFilterBar from "@/components/admin/ui/AdminFilterBar";
+import AdminStatCard from "@/components/admin/ui/AdminStatCard";
 import { useAdminToast } from "@/components/admin/ui/AdminToast";
 
 const PAGE_SIZE = 8;
@@ -72,8 +74,25 @@ export default function AdminProductsManager({ products }: { products: Product[]
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)] md:flex-row md:items-center md:justify-between md:p-5">
-        <div className="flex flex-1 flex-col gap-3 sm:flex-row sm:items-center">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <AdminStatCard label="Total products" value={products.length} />
+        <AdminStatCard label="Low stock" value={products.filter((product) => inferStatus(product.stock) === "low").length} />
+        <AdminStatCard
+          label="Out of stock"
+          value={products.filter((product) => inferStatus(product.stock) === "out").length}
+        />
+      </div>
+
+      <AdminFilterBar
+        actions={
+          <Link
+            href="/admin/products/new"
+            className="inline-flex items-center justify-center rounded-xl bg-gradient-to-b from-cyan-600 to-teal-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:from-cyan-700 hover:to-teal-700"
+          >
+            Add product
+          </Link>
+        }
+      >
           <label className="relative w-full max-w-xl">
             <svg
               className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400"
@@ -91,7 +110,7 @@ export default function AdminProductsManager({ products }: { products: Product[]
                 setPage(1);
               }}
               placeholder="Search by name or category"
-              className="w-full rounded-xl border border-zinc-200 bg-zinc-50/80 py-2.5 pl-10 pr-3 text-sm text-zinc-800 outline-none ring-emerald-500/20 transition placeholder:text-zinc-400 focus:border-emerald-400/80 focus:bg-white focus:ring-4"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50/80 py-2.5 pl-10 pr-3 text-sm text-slate-800 outline-none ring-cyan-500/20 transition placeholder:text-slate-400 focus:border-cyan-400/80 focus:bg-white focus:ring-4"
             />
           </label>
           <select
@@ -100,46 +119,39 @@ export default function AdminProductsManager({ products }: { products: Product[]
               setFilter(event.target.value as ProductStatusFilter);
               setPage(1);
             }}
-            className="rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm font-medium text-zinc-700 outline-none transition focus:border-emerald-400/80 focus:ring-4 focus:ring-emerald-500/15"
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-700 outline-none transition focus:border-cyan-400/80 focus:ring-4 focus:ring-cyan-500/15"
           >
             <option value="all">All status</option>
             <option value="active">Active</option>
             <option value="low">Low stock</option>
             <option value="out">Out of stock</option>
           </select>
-        </div>
-        <Link
-          href="/admin/products/new"
-          className="inline-flex items-center justify-center rounded-xl bg-gradient-to-b from-emerald-500 to-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-emerald-900/15 transition hover:from-emerald-600 hover:to-emerald-700"
-        >
-          Add product
-        </Link>
-      </div>
+      </AdminFilterBar>
 
       <AdminTable
         columns={["Product", "Price", "Stock", "Status", "Category", "Actions"]}
         isEmpty={visible.length === 0}
-        emptyState={<p className="text-sm text-zinc-500">No products match your search.</p>}
+        emptyState={<p className="text-sm text-slate-500">No products match your search.</p>}
       >
         {visible.map((product) => {
           const status = inferStatus(product.stock);
           return (
-            <tr key={product.id} className="border-b border-zinc-100 last:border-0">
+            <tr key={product.id} className="border-b border-slate-100 last:border-0">
               <td className="px-4 py-3">
                 <div className="flex items-center gap-3">
                   <img
                     src={resolveProductImageUrl(product)}
                     alt={product.name}
-                    className="h-12 w-12 rounded-xl border border-zinc-100 object-cover shadow-sm"
+                    className="h-12 w-12 rounded-xl border border-slate-100 object-cover shadow-sm"
                   />
                   <div className="min-w-0">
-                    <p className="font-medium text-zinc-900">{product.name}</p>
-                    <p className="truncate font-mono text-[11px] text-zinc-400">{product.id}</p>
+                    <p className="font-medium text-slate-900">{product.name}</p>
+                    <p className="truncate font-mono text-[11px] text-slate-400">{product.id}</p>
                   </div>
                 </div>
               </td>
-              <td className="px-4 py-3 font-medium text-zinc-900">RM {Number(product.price ?? 0).toFixed(2)}</td>
-              <td className="px-4 py-3 text-zinc-700">{product.stock ?? "-"}</td>
+              <td className="px-4 py-3 font-medium text-slate-900">RM {Number(product.price ?? 0).toFixed(2)}</td>
+              <td className="px-4 py-3 text-slate-700">{product.stock ?? "-"}</td>
               <td className="px-4 py-3">
                 <span
                   className={`rounded-full px-2.5 py-1 text-xs font-medium ${
@@ -153,12 +165,12 @@ export default function AdminProductsManager({ products }: { products: Product[]
                   {status === "out" ? "Out of stock" : status === "low" ? "Low stock" : "Active"}
                 </span>
               </td>
-              <td className="px-4 py-3 text-zinc-600">{product.category || "-"}</td>
+              <td className="px-4 py-3 text-slate-600">{product.category || "-"}</td>
               <td className="px-4 py-3">
                 <div className="flex items-center gap-2">
                   <Link
                     href={`/admin/products/${encodeURIComponent(String(product.id))}/edit`}
-                    className="rounded-lg px-2 py-1 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50 hover:text-emerald-800"
+                    className="rounded-lg px-2 py-1 text-sm font-semibold text-cyan-700 transition hover:bg-cyan-50 hover:text-cyan-800"
                   >
                     Edit
                   </Link>
@@ -176,7 +188,7 @@ export default function AdminProductsManager({ products }: { products: Product[]
         })}
       </AdminTable>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-zinc-200/90 bg-white/90 px-4 py-3 text-sm text-zinc-600 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-[0_6px_16px_-12px_rgba(15,23,42,0.55)]">
         <span>
           Showing {filtered.length === 0 ? 0 : startIndex + 1}-{Math.min(startIndex + PAGE_SIZE, filtered.length)} of{" "}
           {filtered.length}
@@ -186,7 +198,7 @@ export default function AdminProductsManager({ products }: { products: Product[]
             type="button"
             onClick={() => setPage((prev) => Math.max(1, prev - 1))}
             disabled={currentPage <= 1}
-            className="rounded-xl border border-zinc-200 px-3 py-1.5 text-sm text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-xl border border-slate-200 px-3 py-1.5 text-sm text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Previous
           </button>
@@ -197,7 +209,7 @@ export default function AdminProductsManager({ products }: { products: Product[]
             type="button"
             onClick={() => setPage((prev) => Math.min(pageCount, prev + 1))}
             disabled={currentPage >= pageCount}
-            className="rounded-xl border border-zinc-200 px-3 py-1.5 text-sm text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-xl border border-slate-200 px-3 py-1.5 text-sm text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Next
           </button>

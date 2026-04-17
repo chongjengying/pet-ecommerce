@@ -1,4 +1,4 @@
-import ProductCard from "@/components/ProductCard";
+import SearchSection from "@/components/SearchSection";
 import { getProducts } from "@/services/productService";
 import type { Product } from "@/types";
 
@@ -10,7 +10,19 @@ export const metadata = {
 /** Always fetch fresh product list (including stock) so post-checkout UI reflects DB. */
 export const dynamic = "force-dynamic";
 
-export default async function ProductsPage() {
+type ProductsPageProps = {
+  searchParams?:
+    | {
+        q?: string;
+      }
+    | Promise<{
+        q?: string;
+      }>;
+};
+
+export default async function ProductsPage({ searchParams }: ProductsPageProps) {
+  const params = await Promise.resolve(searchParams ?? {});
+  const initialKeyword = String(params.q ?? "").trim();
   const products: Product[] = await getProducts();
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-gradient-to-b from-cream via-cream to-amber-50/25">
@@ -22,13 +34,9 @@ export default async function ProductsPage() {
             Everything you need for a happy, healthy pet — curated for quality and care.
           </p>
         </header>
-        <ul className="mt-12 grid gap-6 sm:grid-cols-2 sm:gap-7 lg:grid-cols-3 lg:gap-8">
-          {products.map((product) => (
-            <li key={product.id}>
-              <ProductCard product={product} />
-            </li>
-          ))}
-        </ul>
+        <div className="mt-12">
+          <SearchSection allProducts={products} initialKeyword={initialKeyword} />
+        </div>
       </div>
     </div>
   );

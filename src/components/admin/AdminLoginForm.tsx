@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { consumeAuthFlash, setAuthFlash } from "@/lib/authFlash";
 
 export default function AdminLoginForm() {
   const router = useRouter();
@@ -16,7 +17,15 @@ export default function AdminLoginForm() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const flash = consumeAuthFlash();
+    if (flash && flash.tone === "success") {
+      setSuccess(flash.message);
+    }
+  }, []);
 
   useEffect(() => {
     if (forbidden || configMissing) return;
@@ -56,6 +65,7 @@ export default function AdminLoginForm() {
         return;
       }
 
+      setAuthFlash("Signed in to admin console successfully.", "success");
       router.replace(nextPath.startsWith("/admin") ? nextPath : "/admin");
       router.refresh();
     } catch {
@@ -101,6 +111,12 @@ export default function AdminLoginForm() {
           <p className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-center text-[13px] leading-relaxed text-amber-900/90">
             Set <span className="font-mono text-[12px]">ADMIN_SESSION_SECRET</span> in{" "}
             <span className="font-mono text-[12px]">.env.local</span>, then restart the dev server.
+          </p>
+        ) : null}
+
+        {success ? (
+          <p className="mb-6 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-center text-[13px] leading-relaxed text-emerald-800" role="status">
+            {success}
           </p>
         ) : null}
 
