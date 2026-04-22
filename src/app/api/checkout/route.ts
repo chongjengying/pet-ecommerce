@@ -15,6 +15,9 @@ import { createPayment } from "@/services/paymentService";
 import { sendCheckoutEmailNotification } from "@/lib/emailNotifications";
 import { readEmailVerificationStatus } from "@/lib/emailVerification";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 type CheckoutAddressPayload = {
   country?: unknown;
   first_name?: unknown;
