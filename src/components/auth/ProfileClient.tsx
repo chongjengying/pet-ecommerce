@@ -296,7 +296,7 @@ export default function ProfileClient({
   const userHandle = displayUsername(user?.username);
   const personalName = [user?.first_name?.trim(), user?.last_name?.trim()].filter(Boolean).join(" ").trim();
   const greetingName = personalName || user?.full_name?.trim() || userHandle;
-  const initials = getAvatarInitials(personalName || user?.full_name ?? null, user?.username?.replace(/^@+/, "") ?? "");
+  const initials = getAvatarInitials((personalName || user?.full_name) ?? null, user?.username?.replace(/^@+/, "") ?? "");
   const shippingAddress = user ? defaultShippingAddress(user) : null;
   const selectedGender = normalizeGender(user?.gender);
   const selectedAddressLabel = normalizeAddressLabel(shippingAddress?.label);

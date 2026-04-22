@@ -5,6 +5,21 @@ import type { Product } from "@/types"
 
 type ProductRow = Record<string, unknown> & { id?: string | number }
 
+export function isValidProduct(product: Product | null | undefined): product is Product {
+  if (!product) return false
+  if (typeof product.id !== "string" || product.id.trim().length === 0) return false
+  if (typeof product.name !== "string" || product.name.trim().length === 0) return false
+  if (!Number.isFinite(product.price) || product.price < 0) return false
+  if (product.stock != null && (!Number.isFinite(product.stock) || product.stock < 0)) return false
+  if (product.gallery_images != null) {
+    if (!Array.isArray(product.gallery_images)) return false
+    if (!product.gallery_images.every((url) => typeof url === "string" && url.trim().length > 0)) {
+      return false
+    }
+  }
+  return true
+}
+
 const PRODUCT_LIST_COLUMNS = [
   "id",
   "name",
@@ -471,7 +486,7 @@ export async function getProducts(): Promise<Product[]> {
   const withCategories = await attachCategoryNames(withImages as ProductRow[])
   return withCategories
     .map((row) => normalizeProduct(row as ProductRow))
-    .filter((p): p is Product => p != null)
+    .filter(isValidProduct)
 }
 
 export async function searchProducts(keyword: string): Promise<Product[]> {
@@ -485,10 +500,10 @@ export async function searchProducts(keyword: string): Promise<Product[]> {
   const withCategories = await attachCategoryNames(withImages as ProductRow[])
   return withCategories
     .map((row) => normalizeProduct(row as ProductRow))
-    .filter((p): p is Product => p != null)
+    .filter(isValidProduct)
 }
 
-export async function getProductById(productId: string | number): Promise<Product> {
+export async function getProductById(productId: string | number): Promise<Product | null> {
   const id = productId
   const { data, error } = await supabase
     .from("products")
@@ -496,7 +511,7 @@ export async function getProductById(productId: string | number): Promise<Produc
     .eq("id", id as string | number)
     .single()
 
-  if (error || !data) throw error ?? new Error("Product not found")
+  if (error || !data) return null
 
   const [withCategoryRows, galleryUrls] = await Promise.all([
     attachCategoryNames([data as ProductRow]),
@@ -505,19 +520,20 @@ export async function getProductById(productId: string | number): Promise<Produc
 
   const withCategory = withCategoryRows[0] as ProductRow
   const normalized = normalizeProduct(withCategory)
-  if (!normalized) throw new Error("Product shape is invalid")
+  if (!normalized) return null
 
   const mainFallback = resolveProductImageUrl(normalized)
   const fallbackGallery = mainFallback ? [mainFallback] : []
   const gallery_images = galleryUrls.length > 0 ? galleryUrls : fallbackGallery
 
   const primaryImage = gallery_images[0] || mainFallback
-  return {
+  const product = {
     ...normalized,
     image: normalized.image ?? primaryImage,
     image_url: normalized.image_url ?? primaryImage,
     gallery_images,
   }
+  return isValidProduct(product) ? product : null
 }
 
 export async function getRelatedProducts(
@@ -538,7 +554,7 @@ export async function getRelatedProducts(
   const withCategories = await attachCategoryNames(withImages as ProductRow[])
   return withCategories
     .map((row) => normalizeProduct(row as ProductRow))
-    .filter((p): p is Product => p != null)
+    .filter(isValidProduct)
     .slice(0, safeLimit)
 }
 

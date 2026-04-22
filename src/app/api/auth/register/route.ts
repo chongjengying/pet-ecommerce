@@ -18,8 +18,38 @@ type RegisterBody = {
   lastName?: string;
 };
 
+type CreatedUser = {
+  id: string | number;
+  email: string;
+  username: string;
+  first_name: string | null;
+  last_name: string | null;
+  role: string | null;
+};
+
 function composeFullName(firstName: string, lastName: string, fallback = ""): string {
   return [firstName, lastName].filter(Boolean).join(" ").trim() || fallback.trim();
+}
+
+function normalizeCreatedUser(
+  row: Record<string, unknown> | null | undefined,
+  fallback: { role?: string; first_name?: string | null; last_name?: string | null } = {}
+): CreatedUser | null {
+  if (!row) return null;
+  return {
+    id: (row.id as string | number) ?? "",
+    email: typeof row.email === "string" ? row.email : "",
+    username: typeof row.username === "string" ? row.username : "",
+    first_name:
+      typeof row.first_name === "string"
+        ? row.first_name
+        : (fallback.first_name ?? null),
+    last_name:
+      typeof row.last_name === "string"
+        ? row.last_name
+        : (fallback.last_name ?? null),
+    role: typeof row.role === "string" ? row.role : (fallback.role ?? null),
+  };
 }
 
 function isValidEmail(value: string): boolean {
@@ -112,7 +142,7 @@ export async function POST(request: Request) {
     .select("id, email, username, first_name, last_name, role")
     .single();
 
-  let created = createdWithRole;
+  let created = normalizeCreatedUser(createdWithRole as Record<string, unknown> | null);
   let createError = createWithRoleErr;
 
   if (
@@ -129,7 +159,7 @@ export async function POST(request: Request) {
       })
       .select("id, email, username, role")
       .single();
-    created = createdWithoutNameColumns;
+    created = normalizeCreatedUser(createdWithoutNameColumns as Record<string, unknown> | null);
     createError = createWithoutNameColumnsErr;
   }
 
@@ -145,7 +175,7 @@ export async function POST(request: Request) {
       })
       .select("id, email, username, first_name, last_name")
       .single();
-    created = createdWithoutRole ? { ...createdWithoutRole, role: "customer" } : null;
+    created = normalizeCreatedUser(createdWithoutRole as Record<string, unknown> | null, { role: "customer" });
     createError = createWithoutRoleErr;
   }
 
@@ -163,7 +193,7 @@ export async function POST(request: Request) {
       })
       .select("id, email, username")
       .single();
-    created = createdLegacy ? { ...createdLegacy, role: "customer" } : null;
+    created = normalizeCreatedUser(createdLegacy as Record<string, unknown> | null, { role: "customer" });
     createError = createdLegacyErr;
   }
 

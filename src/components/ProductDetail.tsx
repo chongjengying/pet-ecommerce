@@ -13,6 +13,23 @@ interface ProductDetailProps {
   relatedProducts: Product[];
 }
 
+function toNonEmptyText(value: unknown, fallback = ""): string {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
+}
+
+function toFiniteNumber(value: unknown, fallback = 0): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function toSafeImageSrc(value: string | null | undefined, productId: string | number): string {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (/^https?:\/\//i.test(raw) || raw.startsWith("/")) {
+    return raw;
+  }
+  return `https://picsum.photos/400/400?random=${productId}`;
+}
+
 function getStock(product: Product): number | undefined {
   if (product.stock == null) return undefined;
   const n = Number(product.stock);
@@ -25,15 +42,41 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
   const [added, setAdded] = useState(false);
   const [zoomOpen, setZoomOpen] = useState(false);
   const [related, setRelated] = useState<Product[]>(relatedProducts);
+  const safeId = toNonEmptyText(product?.id, "unknown-product");
+  const safeName = toNonEmptyText(product?.name, "Product");
+  const safePrice = Math.max(0, toFiniteNumber(product?.price, 0));
+  const safeCategory = toNonEmptyText(product?.category, "Products");
+  const safeBrand = toNonEmptyText(product?.brand, "");
+  const safeDescription = toNonEmptyText(product?.description, "");
+  const safeColor = toNonEmptyText(product?.color, "");
+  const safeDeliveryLabel = toNonEmptyText(product?.delivery_badge_text, "RM0 Delivery");
+  const safeProduct: Product = useMemo(
+    () => ({
+      ...product,
+      id: safeId,
+      name: safeName,
+      price: safePrice,
+      category: safeCategory,
+      brand: safeBrand || null,
+      description: safeDescription || null,
+      color: safeColor || null,
+      delivery_badge_text: safeDeliveryLabel,
+    }),
+    [product, safeCategory, safeDeliveryLabel, safeDescription, safeId, safeName, safePrice, safeBrand, safeColor]
+  );
 
   const gallery = useMemo(() => {
-    const g = product.gallery_images;
-    if (Array.isArray(g) && g.length > 0) return g;
-    return [resolveProductImageUrl(product)];
-  }, [product]);
+    const g = safeProduct.gallery_images;
+    if (Array.isArray(g) && g.length > 0) {
+      return g.map((url) => toSafeImageSrc(url, safeId));
+    }
+    return [toSafeImageSrc(resolveProductImageUrl(safeProduct), safeId)];
+  }, [safeId, safeProduct]);
 
   const [activeIndex, setActiveIndex] = useState(0);
-  const mainImageUrl = gallery[Math.min(activeIndex, gallery.length - 1)] ?? resolveProductImageUrl(product);
+  const mainImageUrl =
+    gallery[Math.min(activeIndex, gallery.length - 1)] ??
+    toSafeImageSrc(resolveProductImageUrl(safeProduct), safeId);
   const displayRelated = relatedProducts.length > 0 ? relatedProducts : related;
 
   useEffect(() => {
@@ -41,7 +84,7 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
     let active = true;
     void (async () => {
       try {
-        const response = await fetch(`/api/products/${encodeURIComponent(String(product.id))}/related`, {
+        const response = await fetch(`/api/products/${encodeURIComponent(String(safeId))}/related`, {
           method: "GET",
           cache: "no-store",
         });
@@ -56,38 +99,38 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
     return () => {
       active = false;
     };
-  }, [product.id, relatedProducts]);
+  }, [relatedProducts, safeId]);
 
-  const stock = getStock(product);
-  const inCartQty = items.find((i) => String(i.id) === String(product.id))?.quantity ?? 0;
+  const stock = getStock(safeProduct);
+  const inCartQty = items.find((i) => String(i.id) === String(safeId))?.quantity ?? 0;
   const availableStock = stock !== undefined ? Math.max(0, stock - inCartQty) : undefined;
   const outOfStock = availableStock !== undefined && availableStock <= 0;
   const maxQty = availableStock !== undefined ? Math.max(0, availableStock) : undefined;
   const effectiveQty = maxQty !== undefined ? Math.min(quantity, maxQty) : quantity;
 
-  const compareAt = product.compare_at_price;
+  const compareAt = toFiniteNumber(safeProduct.compare_at_price, 0);
   const showCompare =
-    compareAt != null && Number.isFinite(compareAt) && compareAt > Number(product.price);
+    compareAt > safePrice;
   const discountPct =
-    showCompare && compareAt
-      ? Math.max(0, Math.round((1 - Number(product.price) / compareAt) * 100))
+    showCompare
+      ? Math.max(0, Math.round((1 - safePrice / compareAt) * 100))
       : 0;
 
-  const deliveryLabel = product.delivery_badge_text?.trim() || "RM0 Delivery";
+  const deliveryLabel = safeDeliveryLabel;
 
   /** Matches admin “Size” / `size_label` and DB `size` / `item_size` (see normalizeProduct). */
   const sizeDisplay = useMemo(() => {
-    const s = (product.size_label ?? product.size)?.trim();
+    const s = (safeProduct.size_label ?? safeProduct.size)?.trim();
     return s && s.length > 0 ? s : "";
-  }, [product.size_label, product.size]);
+  }, [safeProduct.size_label, safeProduct.size]);
 
   const handleAddToCart = async () => {
     if (outOfStock || effectiveQty <= 0) return;
     const ok = await addToCart(
-      {
-        ...product,
-        image: resolveProductImageUrl(product),
-        category: product.category ?? "",
+        {
+        ...safeProduct,
+        image: resolveProductImageUrl(safeProduct),
+        category: safeCategory,
       },
       effectiveQty
     );
@@ -96,13 +139,13 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
     setTimeout(() => setAdded(false), 2000);
   };
 
-  const categoryLabel = product.category?.trim() || "Products";
-  const brandLabel = product.brand?.trim();
+  const categoryLabel = safeCategory;
+  const brandLabel = safeBrand || undefined;
 
   const expandSections = [
-    { key: "benefit", title: "Benefit", value: product.benefit },
-    { key: "ingredients", title: "Ingredients", value: product.ingredients },
-    { key: "feeding", title: "Feeding Instructions", value: product.feeding_instructions },
+    { key: "benefit", title: "Benefit", value: safeProduct.benefit },
+    { key: "ingredients", title: "Ingredients", value: safeProduct.ingredients },
+    { key: "feeding", title: "Feeding Instructions", value: safeProduct.feeding_instructions },
   ] as const;
 
   const sharePage = () => {
@@ -132,7 +175,7 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
             <li className="text-umber/35" aria-hidden="true">
               /
             </li>
-            <li className="line-clamp-2 font-medium text-umber">{product.name}</li>
+            <li className="line-clamp-2 font-medium text-umber">{safeName}</li>
           </ol>
         </nav>
 
@@ -143,7 +186,7 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
               <div className="relative aspect-square w-full">
                 <Image
                   src={mainImageUrl}
-                  alt={product.name}
+                  alt={safeName}
                   fill
                   className="object-contain p-4"
                   sizes="(max-width: 1024px) 100vw, 50vw"
@@ -197,7 +240,7 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
           {/* Right: info */}
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-umber sm:text-3xl lg:text-4xl">
-              {product.name}
+              {safeName}
             </h1>
             {brandLabel ? (
               <p className="mt-2 text-sm text-sage">
@@ -218,7 +261,7 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
                 <p className="tabular-nums">
                   <span className="text-lg font-medium text-umber/70">RM</span>{" "}
                   <span className="text-3xl font-semibold tracking-tight text-terracotta sm:text-4xl">
-                    {Number(product.price ?? 0).toFixed(2)}
+                    {safePrice.toFixed(2)}
                   </span>
                 </p>
               </div>
@@ -293,7 +336,7 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
             <div className="mt-10 space-y-2.5 border-t border-amber-200/80 pt-8 text-sm leading-relaxed text-umber">
               <p>
                 <span className="font-bold">Item:</span>{" "}
-                <span className="font-normal">{product.name}</span>
+                <span className="font-normal">{safeName}</span>
               </p>
               <p>
                 <span className="font-bold">Size:</span>{" "}
@@ -301,7 +344,7 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
               </p>
               <p>
                 <span className="font-bold">Color:</span>{" "}
-                <span className="font-normal">{product.color?.trim() || "—"}</span>
+                <span className="font-normal">{safeColor || "—"}</span>
               </p>
               <p>
                 <span className="font-bold">Quantity:</span>{" "}
@@ -311,10 +354,10 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
               </p>
             </div>
 
-            {product.description != null && String(product.description).trim() ? (
+            {safeDescription ? (
               <div className="mt-8 border-t border-amber-200/80 pt-8">
                 <h2 className="text-sm font-semibold text-umber">Description</h2>
-                <p className="mt-2 text-sm leading-relaxed text-umber/75">{product.description}</p>
+                <p className="mt-2 text-sm leading-relaxed text-umber/75">{safeDescription}</p>
               </div>
             ) : null}
 
@@ -387,8 +430,8 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
           <section className="mt-16 border-t border-amber-200/80 pt-12">
             <h2 className="text-center text-xl font-bold text-umber sm:text-2xl">You may also like</h2>
             <ul className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-              {displayRelated.map((p) => (
-                <li key={p.id}>
+              {displayRelated.map((p, idx) => (
+                <li key={String(p?.id ?? `related-${idx}`)}>
                   <ProductCard product={p} />
                 </li>
               ))}
@@ -414,7 +457,7 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
             Close
           </button>
           <div className="relative h-[min(85vh,800px)] w-full max-w-4xl" onClick={(e) => e.stopPropagation()}>
-            <Image src={mainImageUrl} alt={product.name} fill className="object-contain" sizes="100vw" />
+            <Image src={mainImageUrl} alt={safeName} fill className="object-contain" sizes="100vw" />
           </div>
         </div>
       ) : null}
