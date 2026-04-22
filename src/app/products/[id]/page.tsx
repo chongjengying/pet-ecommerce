@@ -1,25 +1,13 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import ProductDetail from "@/components/ProductDetail";
-import { getProductById, getProducts } from "@/services/productService";
+import { getProductById, getProducts, isRenderableProduct } from "@/services/productService";
 
 export const dynamicParams = false;
 
 function toValidId(value: unknown): string | null {
   const id = String(value ?? "").trim();
   return id.length > 0 ? id : null;
-}
-
-function isValidProduct(product: unknown): product is {
-  id: string | number;
-  name: string;
-  description?: string;
-} {
-  return !!product &&
-    typeof product === "object" &&
-    "name" in product &&
-    typeof (product as { name?: unknown }).name === "string" &&
-    (product as { name: string }).name.trim().length > 0;
 }
 
 export async function generateStaticParams() {
@@ -32,8 +20,8 @@ export async function generateStaticParams() {
 
   const settled = await Promise.allSettled(
     candidateIds.map(async (id) => {
-      const product = await getProductById(id);
-      return isValidProduct(product) ? id : null;
+      const product = await getProductById(id).catch(() => null);
+      return isRenderableProduct(product) ? id : null;
     })
   );
 
@@ -70,7 +58,7 @@ export async function generateMetadata(
 
   const product = await getProductById(safeId).catch(() => null);
 
-  if (!isValidProduct(product)) {
+  if (!isRenderableProduct(product)) {
     return {
       title: "Product not found - Pawluxe",
       description: "This product is unavailable.",
@@ -91,7 +79,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
 
   const product = await getProductById(safeId).catch(() => null);
 
-  if (!isValidProduct(product)) return notFound();
+  if (!isRenderableProduct(product)) return notFound();
 
   return <ProductDetail product={product} relatedProducts={[]} />;
 }

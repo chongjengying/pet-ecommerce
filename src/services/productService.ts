@@ -5,6 +5,24 @@ import type { Product } from "@/types"
 
 type ProductRow = Record<string, unknown> & { id?: string | number }
 
+export type ProductLike = {
+  id: string | number
+  name: string
+  description?: string
+  price?: number
+  images?: unknown[]
+}
+
+export function isRenderableProduct(product: unknown): product is ProductLike {
+  if (!product || typeof product !== "object") return false
+  const p = product as Record<string, unknown>
+  return (
+    (typeof p.id === "string" || typeof p.id === "number") &&
+    typeof p.name === "string" &&
+    p.name.trim().length > 0
+  )
+}
+
 export function isValidProduct(product: Product | null | undefined): product is Product {
   if (!product) return false
   if (typeof product.id !== "string" || product.id.trim().length === 0) return false

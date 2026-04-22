@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import { getRelatedProducts } from "@/services/productService";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export async function GET(
   _request: Request,
@@ -11,6 +13,7 @@ export async function GET(
       return NextResponse.json({ error: "Missing product id." }, { status: 400 });
     }
 
+    const { getRelatedProducts } = await import("@/services/productService");
     const products = await getRelatedProducts(id, 4).catch(() => []);
     return NextResponse.json({ products });
   } catch (err) {
@@ -18,4 +21,3 @@ export async function GET(
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }
-
