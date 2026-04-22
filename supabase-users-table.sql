@@ -6,10 +6,14 @@ create table if not exists public.users (
   email text not null unique,
   username text not null unique,
   password text not null,
-  full_name text,
+  first_name text,
+  last_name text,
   role text not null default 'customer',
   created_at timestamptz not null default now()
 );
+
+alter table public.users add column if not exists first_name text;
+alter table public.users add column if not exists last_name text;
 
 create index if not exists idx_users_email on public.users (email);
 create index if not exists idx_users_username on public.users (username);

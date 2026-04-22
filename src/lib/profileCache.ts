@@ -19,6 +19,8 @@ export type CachedProfileUser = {
   id: string;
   email: string;
   username: string;
+  first_name: string | null;
+  last_name: string | null;
   full_name: string | null;
   avatar_url?: string | null;
   phone?: string | null;

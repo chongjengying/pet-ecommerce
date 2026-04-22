@@ -84,6 +84,8 @@ export type CustomerOrderStatusData = {
 };
 
 function isMissingColumnError(error: unknown): boolean {
+  const code = String((error as { code?: string })?.code ?? "").toLowerCase();
+  if (code === "42703" || code === "pgrst204") return true;
   const message = String((error as { message?: string })?.message ?? "").toLowerCase();
   return (
     message.includes("does not exist") ||
@@ -93,8 +95,28 @@ function isMissingColumnError(error: unknown): boolean {
 }
 
 function isInvalidTypeFilterError(error: unknown): boolean {
+  const code = String((error as { code?: string })?.code ?? "").toLowerCase();
+  if (code === "22p02" || code === "42883") return true;
   const message = String((error as { message?: string })?.message ?? "").toLowerCase();
   return message.includes("invalid input syntax") || message.includes("operator does not exist");
+}
+
+function parseMissingColumn(error: unknown): string | null {
+  const message = String((error as { message?: string })?.message ?? "");
+  return (
+    message.match(/Could not find the '([^']+)' column/i)?.[1] ??
+    message.match(/column ["']?([a-zA-Z0-9_]+)["']? does not exist/i)?.[1] ??
+    null
+  );
+}
+
+function logMissingColumn(context: string, error: unknown, details: Record<string, unknown>) {
+  console.warn(`[schema-fallback] ${context}`, {
+    code: String((error as { code?: string })?.code ?? "") || null,
+    missingColumn: parseMissingColumn(error),
+    message: String((error as { message?: string })?.message ?? "Unknown customer order schema error."),
+    ...details,
+  });
 }
 
 function cleanMaybeString(value: unknown): string | null {
@@ -291,6 +313,11 @@ async function fetchOrderItemsMap(
     if (!isMissingColumnError(error)) {
       throw new Error(error.message || "Could not load order items.");
     }
+
+    logMissingColumn("order_items.select", error, {
+      table: "order_items",
+      select,
+    });
   }
 
   return result;
@@ -364,6 +391,12 @@ export async function loadCustomerOrderStatuses(
       if (!isMissingColumnError(error)) {
         throw new Error(error.message || "Could not load customer order.");
       }
+
+      logMissingColumn("orders.select.by_user_id", error, {
+        table: "orders",
+        select,
+        userId: String(userId),
+      });
     }
     return [];
   };
@@ -385,6 +418,13 @@ export async function loadCustomerOrderStatuses(
         .order("created_at", { ascending: false });
       if (!error) {
         return Array.isArray(data) ? (data as OrderSelectRow[]) : [];
+      }
+      if (isMissingColumnError(error)) {
+        logMissingColumn("orders.select.by_metadata_contains", error, {
+          table: "orders",
+          select,
+          customerKeys: Object.keys(customer),
+        });
       }
       return null;
     };
@@ -421,6 +461,12 @@ export async function loadCustomerOrderStatuses(
       if (!error) {
         const rows = Array.isArray(data) ? (data as OrderSelectRow[]) : [];
         if (rows.length > 0) return await mapOrdersWithItemFallback(supabase, rows);
+      }
+      if (error && isMissingColumnError(error)) {
+        logMissingColumn("orders.select.by_metadata_email", error, {
+          table: "orders",
+          select,
+        });
       }
       if (error && !isMissingColumnError(error)) continue;
     }

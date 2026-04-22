@@ -12,7 +12,8 @@ create table if not exists public.users (
   email text not null unique,
   username text not null unique,
   password text not null,
-  full_name text,
+  first_name text,
+  last_name text,
   role text not null default 'customer',
   created_at timestamptz not null default now()
 );
@@ -26,6 +27,8 @@ create table if not exists public.profiles (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null unique references public.users (id) on delete cascade,
   username text,
+  first_name text,
+  last_name text,
   full_name text,
   avatar_url text,
   phone text,
@@ -35,6 +38,11 @@ create table if not exists public.profiles (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.users add column if not exists first_name text;
+alter table public.users add column if not exists last_name text;
+alter table public.profiles add column if not exists first_name text;
+alter table public.profiles add column if not exists last_name text;
 
 create index if not exists idx_profiles_user_id on public.profiles (user_id);
 

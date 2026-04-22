@@ -26,6 +26,8 @@ type LoginUserRow = {
   password: string;
   password_hash?: string;
   username: string;
+  first_name: string | null;
+  last_name: string | null;
   full_name: string | null;
   role: string | null;
 };
@@ -86,13 +88,19 @@ function recordFailedLoginAttempt(identifier: string): LoginAttemptState {
 function normalizeUserRow(row: Record<string, unknown>): LoginUserRow {
   const email = String(row.email ?? "").trim().toLowerCase();
   const usernameRaw = typeof row.username === "string" ? row.username.trim() : "";
+  const firstName = typeof row.first_name === "string" ? row.first_name : null;
+  const lastName = typeof row.last_name === "string" ? row.last_name : null;
+  const legacyFullName = typeof row.full_name === "string" ? row.full_name : null;
+  const derivedFullName = [firstName, lastName].filter(Boolean).join(" ").trim() || legacyFullName;
   return {
     id: row.id as string | number,
     email,
     password: typeof row.password === "string" ? row.password : "",
     password_hash: typeof row.password_hash === "string" ? row.password_hash : undefined,
     username: usernameRaw || (email.includes("@") ? email.split("@")[0] : email || "customer"),
-    full_name: typeof row.full_name === "string" ? row.full_name : null,
+    first_name: firstName,
+    last_name: lastName,
+    full_name: derivedFullName,
     role: typeof row.role === "string" ? row.role : "customer",
   };
 }
@@ -112,11 +120,15 @@ async function queryUserByEmailOrUsername(
   identifier: string
 ): Promise<{ user: LoginUserRow | null; error: string | null }> {
   const selects = [
+    "id,email,password,password_hash,username,first_name,last_name,role",
+    "id,email,password_hash,username,first_name,last_name,role",
+    "id,email,password,username,first_name,last_name,role",
+    "id,email,password,password_hash,username,role",
+    "id,email,password_hash,username,role",
+    "id,email,password,username,role",
     "id,email,password,password_hash,username,full_name,role",
     "id,email,password_hash,username,full_name,role",
     "id,email,password,username,full_name,role",
-    "id,email,password_hash,username,role",
-    "id,email,password,username,role",
     "id,email,password_hash,username",
     "id,email,password,username",
     "id,email,password_hash",
@@ -165,11 +177,15 @@ async function queryUserById(
   userId: string | number
 ): Promise<{ user: LoginUserRow | null; error: string | null }> {
   const selects = [
+    "id,email,password,password_hash,username,first_name,last_name,role",
+    "id,email,password_hash,username,first_name,last_name,role",
+    "id,email,password,username,first_name,last_name,role",
+    "id,email,password,password_hash,username,role",
+    "id,email,password_hash,username,role",
+    "id,email,password,username,role",
     "id,email,password,password_hash,username,full_name,role",
     "id,email,password_hash,username,full_name,role",
     "id,email,password,username,full_name,role",
-    "id,email,password_hash,username,role",
-    "id,email,password,username,role",
     "id,email,password_hash,username",
     "id,email,password,username",
     "id,email,password_hash",

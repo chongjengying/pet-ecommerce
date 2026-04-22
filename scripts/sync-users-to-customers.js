@@ -15,7 +15,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
 async function main() {
   const { data: users, error: usersError } = await supabase
     .from("users")
-    .select("id, email, username, full_name");
+    .select("id, email, username, first_name, last_name");
   if (usersError) {
     throw usersError;
   }
@@ -29,8 +29,8 @@ async function main() {
     id: user.id,
     email: user.email,
     username: user.username,
-    name: user.full_name ?? user.username,
-    full_name: user.full_name ?? null,
+    name: [user.first_name, user.last_name].filter(Boolean).join(" ").trim() || user.username,
+    full_name: [user.first_name, user.last_name].filter(Boolean).join(" ").trim() || null,
   }));
 
   const { error: upsertError, data: upserted } = await supabase

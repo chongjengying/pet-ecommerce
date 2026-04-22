@@ -28,6 +28,9 @@ type CheckoutAddressPayload = {
 };
 
 type CheckoutPaymentMethod = "adaptis_gateway" | "grab" | "bank_transfer";
+const FREE_SHIPPING_THRESHOLD = 150;
+const FLAT_SHIPPING_FEE = 12;
+const TAX_RATE = 0;
 
 function cleanText(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -54,6 +57,23 @@ function buildCheckoutReference(orderNumber: string | null, orderId: string | nu
   const base = (orderNumber ?? orderId ?? "").replace(/[^a-zA-Z0-9]/g, "").slice(-10).toUpperCase();
   const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
   return `PAY-${base || "ORDER"}-${stamp}`;
+}
+
+function calculateCheckoutPricing(subtotal: number) {
+  const shippingFee = subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : FLAT_SHIPPING_FEE;
+  const taxAmount = Number((subtotal * TAX_RATE).toFixed(2));
+  const totalAmount = Number((subtotal + shippingFee + taxAmount).toFixed(2));
+  return { shippingFee, taxAmount, totalAmount };
+}
+
+function isMissingOrderAddressesTable(error: unknown): boolean {
+  const message = String((error as { message?: string })?.message ?? "").toLowerCase();
+  return (
+    message.includes("order_addresses") &&
+    (message.includes("does not exist") ||
+      message.includes("could not find") ||
+      message.includes("schema cache"))
+  );
 }
 
 async function resolveCheckoutOrderUserId(
@@ -232,6 +252,7 @@ export async function POST(request: Request) {
     (sum, item) => sum + (Number(item.price) || 0) * (item.quantity || 0),
     0
   );
+  const { shippingFee, taxAmount, totalAmount } = calculateCheckoutPricing(subtotal);
 
   const shippingAddressLine1 = cleanText(shippingAddress?.address_line1) ?? shipTo.address_line1;
   const shippingAddressLine2 = cleanText(shippingAddress?.address_line2) ?? shipTo.address_line2;
@@ -243,6 +264,16 @@ export async function POST(request: Request) {
   const shippingLastName = cleanText(shippingAddress?.last_name);
   const shippingPhone = cleanText(shippingAddress?.phone);
   const shippingRecipientName = [shippingFirstName, shippingLastName].filter(Boolean).join(" ").trim() || null;
+  const billingFirstName = cleanText(billingAddress?.first_name);
+  const billingLastName = cleanText(billingAddress?.last_name);
+  const billingPhone = cleanText(billingAddress?.phone);
+  const billingRecipientName = [billingFirstName, billingLastName].filter(Boolean).join(" ").trim() || null;
+  const billingAddressLine1 = cleanText(billingAddress?.address_line1);
+  const billingAddressLine2 = cleanText(billingAddress?.address_line2);
+  const billingCity = cleanText(billingAddress?.city);
+  const billingState = cleanText(billingAddress?.state);
+  const billingPostalCode = cleanText(billingAddress?.postal_code);
+  const billingCountry = cleanText(billingAddress?.country);
 
   // 1) Save order first
   let createdOrder: Awaited<ReturnType<typeof createOrder>> | null = null;
@@ -251,12 +282,12 @@ export async function POST(request: Request) {
       user_id: orderUserId,
       status: "pending",
       subtotal,
-      shipping_fee: 0,
-      tax_amount: 0,
+      shipping_fee: shippingFee,
+      tax_amount: taxAmount,
       discount: 0,
       currency: "MYR",
       payment_status: paymentStatus,
-      shipping_method: "free_shipping",
+      shipping_method: shippingFee === 0 ? "free_shipping" : "standard_shipping",
       tracking_number: null,
       shipping_name: shippingRecipientName,
       shipping_phone: shippingPhone,
@@ -345,6 +376,52 @@ export async function POST(request: Request) {
     );
   }
 
+  // 1.5) Snapshot order addresses (shipping + billing) in dedicated table when available.
+  try {
+    const orderId = createdOrder?.id ?? null;
+    if (orderId) {
+      const addressRows = [
+        {
+          order_id: orderId,
+          address_type: "shipping",
+          name: shippingRecipientName,
+          phone: shippingPhone,
+          address_line1: shippingAddressLine1,
+          address_line2: shippingAddressLine2,
+          city: shippingCity,
+          state: shippingState,
+          postal_code: shippingPostalCode,
+          country: shippingCountry,
+        },
+        {
+          order_id: orderId,
+          address_type: "billing",
+          name: billingSameAsShipping ? shippingRecipientName : billingRecipientName,
+          phone: billingSameAsShipping ? shippingPhone : billingPhone,
+          address_line1: billingSameAsShipping ? shippingAddressLine1 : billingAddressLine1,
+          address_line2: billingSameAsShipping ? shippingAddressLine2 : billingAddressLine2,
+          city: billingSameAsShipping ? shippingCity : billingCity,
+          state: billingSameAsShipping ? shippingState : billingState,
+          postal_code: billingSameAsShipping ? shippingPostalCode : billingPostalCode,
+          country: billingSameAsShipping ? shippingCountry : billingCountry,
+        },
+      ];
+
+      const { error: orderAddressError } = await supabase.from("order_addresses").insert(addressRows);
+      if (orderAddressError && !isMissingOrderAddressesTable(orderAddressError)) {
+        console.warn("[api/checkout POST] order_addresses insert failed", {
+          order_id: orderId,
+          error: orderAddressError.message || String(orderAddressError),
+        });
+      }
+    }
+  } catch (orderAddressErr) {
+    console.warn("[api/checkout POST] order_addresses snapshot failed", {
+      order_id: createdOrder?.id ?? null,
+      error: orderAddressErr instanceof Error ? orderAddressErr.message : String(orderAddressErr),
+    });
+  }
+
   // 2) Then deduct inventory
   try {
     for (const item of orderItems) {
@@ -384,9 +461,9 @@ export async function POST(request: Request) {
     order_number: createdOrder?.order_number ?? null,
     currency: "MYR",
     subtotal,
-    shipping_fee: 0,
-    tax_amount: 0,
-    total_amount: subtotal,
+    shipping_fee: shippingFee,
+    tax_amount: taxAmount,
+    total_amount: totalAmount,
     items: orderItems.map((item) => ({
       name: item.name,
       quantity: item.quantity,
@@ -416,7 +493,7 @@ export async function POST(request: Request) {
           reference_no: referenceNo,
           payment_method: selectedPaymentMethod.payment_method,
           provider: selectedPaymentMethod.provider,
-          amount: subtotal,
+          amount: totalAmount,
           currency: "MYR",
           status: paymentStatus,
           paid_at: null,
@@ -447,9 +524,9 @@ export async function POST(request: Request) {
       id: createdOrder?.id ?? null,
       order_number: createdOrder?.order_number ?? null,
       subtotal,
-      shipping_fee: 0,
-      tax_amount: 0,
-      total_amount: subtotal,
+      shipping_fee: shippingFee,
+      tax_amount: taxAmount,
+      total_amount: totalAmount,
       currency: "MYR",
       shipping: {
         recipient_name: shippingRecipientName,

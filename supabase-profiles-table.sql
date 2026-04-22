@@ -5,6 +5,8 @@ create table if not exists public.profiles (
   id bigserial primary key,
   user_id bigint not null unique references public.users(id) on delete cascade,
   username text,
+  first_name text,
+  last_name text,
   full_name text,
   avatar_url text,
   phone text,
@@ -13,6 +15,9 @@ create table if not exists public.profiles (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.profiles add column if not exists first_name text;
+alter table public.profiles add column if not exists last_name text;
 
 create index if not exists idx_profiles_user_id on public.profiles (user_id);
 

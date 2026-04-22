@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { type CartRowItem } from "@/components/cart/CartItemRow";
 
@@ -476,16 +476,6 @@ export default function CartPage() {
     router.prefetch("/profile/orders");
   }, [router]);
 
-  useEffect(() => {
-    if (!checkoutSuccess) return;
-    const timeout = window.setTimeout(() => {
-      startTransition(() => {
-        router.push("/profile/orders");
-      });
-    }, 1800);
-    return () => window.clearTimeout(timeout);
-  }, [checkoutSuccess, router]);
-
   const handleCheckout = async () => {
     setCheckoutError(null);
     if (!cart || cartItems.length === 0) return;
@@ -566,9 +556,9 @@ export default function CartPage() {
       const fallbackOrder: CheckoutSuccessOrder = {
         order_number: null,
         subtotal,
-        shipping_fee: 0,
+        shipping_fee: shippingEstimate,
         tax_amount: 0,
-        total_amount: subtotal,
+        total_amount: subtotal + shippingEstimate,
         currency: "MYR",
         shipping: {
           recipient_name: recipientName || null,
@@ -640,7 +630,9 @@ export default function CartPage() {
                   </Link>
                 </p>
               ) : null}
-              <p className="mt-2 text-sm text-zinc-500">Redirecting to your orders...</p>
+              <p className="mt-2 text-sm text-zinc-500">
+                Your order history is saved. Open order summary when you are ready.
+              </p>
             </div>
 
             <div className="mt-8 rounded-xl border border-zinc-200 p-5">

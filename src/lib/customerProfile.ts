@@ -6,14 +6,27 @@ import {
 } from "@/lib/userAddressDb";
 import { userIdForDbQuery } from "@/lib/userIdDb";
 
-const USER_FIELDS = "id, email, username, full_name, role";
-const USER_FIELDS_NO_ROLE = "id, email, username, full_name";
-const PROFILE_FIELDS = "id, user_id, username, full_name, avatar_url, phone, gender, dob";
+const USER_SELECT_ATTEMPTS = [
+  "id, email, username, first_name, last_name, role",
+  "id, email, username, first_name, last_name",
+  "id, email, username, first_name, last_name, full_name, role",
+  "id, email, username, full_name, role",
+  "id, email, username, first_name, last_name, full_name",
+  "id, email, username, full_name",
+] as const;
+
+export const PROFILE_SELECT_ATTEMPTS = [
+  "id, user_id, username, first_name, last_name, full_name, avatar_url, phone, gender, dob",
+  "id, user_id, username, first_name, last_name, avatar_url, phone, gender, dob",
+  "id, user_id, username, full_name, avatar_url, phone, gender, dob",
+] as const;
 
 export type ProfileUser = {
   id: string;
   email: string;
   username: string;
+  first_name: string | null;
+  last_name: string | null;
   full_name: string | null;
   role: string | null;
   avatar_url: string | null;
@@ -27,6 +40,8 @@ export type ResolvedUser = {
   id: string;
   email: string;
   username: string;
+  first_name: string | null;
+  last_name: string | null;
   full_name: string | null;
   role: string | null;
 };
@@ -56,12 +71,53 @@ export function isMissingProfilesTable(error: unknown): boolean {
   return message.includes("profiles") && (message.includes("does not exist") || message.includes("could not find"));
 }
 
+function isMissingColumnError(error: unknown, column?: string): boolean {
+  const code = String((error as { code?: string })?.code ?? "").toLowerCase();
+  const message = String((error as { message?: string })?.message ?? "").toLowerCase();
+  if (code === "42703" || code === "pgrst204") {
+    return column ? message.includes(column.toLowerCase()) : true;
+  }
+  return (
+    message.includes("column") &&
+    (message.includes("does not exist") || message.includes("could not find")) &&
+    (column ? message.includes(column.toLowerCase()) : true)
+  );
+}
+
+function parseMissingColumn(error: unknown): string | null {
+  const message = String((error as { message?: string })?.message ?? "");
+  return (
+    message.match(/Could not find the '([^']+)' column/i)?.[1] ??
+    message.match(/column ["']?([a-zA-Z0-9_]+)["']? does not exist/i)?.[1] ??
+    null
+  );
+}
+
+function logMissingColumn(context: string, error: unknown, details: Record<string, unknown>) {
+  console.warn(`[schema-fallback] ${context}`, {
+    code: String((error as { code?: string })?.code ?? "") || null,
+    missingColumn: parseMissingColumn(error),
+    message: String((error as { message?: string })?.message ?? "Unknown profile schema error."),
+    ...details,
+  });
+}
+
+function composeFullName(firstName: string | null, lastName: string | null, fullName: string | null): string | null {
+  const combined = [firstName, lastName].filter((value): value is string => typeof value === "string" && value.trim().length > 0).join(" ").trim();
+  return combined || fullName || null;
+}
+
 function normalizeResolvedUser(row: Record<string, unknown>): ResolvedUser {
+  const firstName = typeof row.first_name === "string" ? row.first_name : null;
+  const lastName = typeof row.last_name === "string" ? row.last_name : null;
+  const fullName = typeof row.full_name === "string" ? row.full_name : null;
   return {
     id: row.id != null ? String(row.id) : "",
     email: String(row.email ?? ""),
     username: String(row.username ?? ""),
-    full_name: typeof row.full_name === "string" ? row.full_name : null,
+    first_name: firstName,
+    last_name: lastName,
+    full_name: composeFullName(firstName, lastName, fullName),
     role: typeof row.role === "string" ? row.role : "customer",
   };
 }
@@ -75,33 +131,62 @@ export async function selectUsersWithRoleFallback(
   supabase: ReturnType<typeof getSupabaseServerClient>,
   fetcher: (fields: string) => PromiseLike<UsersQueryResult>
 ): Promise<{ rows: ResolvedUser[]; error: string | null }> {
-  const withRole = await fetcher(USER_FIELDS);
-  if (!withRole.error) {
-    return {
-      rows: Array.isArray(withRole.data)
-        ? (withRole.data as Record<string, unknown>[]).map(normalizeResolvedUser)
-        : withRole.data
-          ? [normalizeResolvedUser(withRole.data as Record<string, unknown>)]
-          : [],
-      error: null,
-    };
-  }
-  if (!isMissingRoleColumnError(withRole.error)) {
-    return { rows: [], error: withRole.error.message || "Could not load user profile." };
-  }
+  let lastError: string | null = null;
+  for (const fields of USER_SELECT_ATTEMPTS) {
+    const result = await fetcher(fields);
+    if (!result.error) {
+      return {
+        rows: Array.isArray(result.data)
+          ? (result.data as Record<string, unknown>[]).map(normalizeResolvedUser)
+          : result.data
+            ? [normalizeResolvedUser(result.data as Record<string, unknown>)]
+            : [],
+        error: null,
+      };
+    }
 
-  const withoutRole = await fetcher(USER_FIELDS_NO_ROLE);
-  if (withoutRole.error) {
-    return { rows: [], error: withoutRole.error.message || "Could not load user profile." };
+    lastError = result.error.message || "Could not load user profile.";
+    if (
+      !isMissingRoleColumnError(result.error) &&
+      !isMissingColumnError(result.error, "full_name") &&
+      !isMissingColumnError(result.error, "first_name") &&
+      !isMissingColumnError(result.error, "last_name")
+    ) {
+      return { rows: [], error: lastError };
+    }
+    logMissingColumn("users.select", result.error, {
+      table: "users",
+      fields,
+    });
   }
-  return {
-    rows: Array.isArray(withoutRole.data)
-      ? (withoutRole.data as Record<string, unknown>[]).map(normalizeResolvedUser)
-      : withoutRole.data
-        ? [normalizeResolvedUser(withoutRole.data as Record<string, unknown>)]
-        : [],
-    error: null,
-  };
+  return { rows: [], error: lastError };
+}
+
+export async function selectProfileWithFallback(
+  supabase: ReturnType<typeof getSupabaseServerClient>,
+  userId: string | number
+): Promise<{ data: Record<string, unknown> | null; error: { message?: string } | null }> {
+  let lastError: { message?: string } | null = null;
+  for (const fields of PROFILE_SELECT_ATTEMPTS) {
+    const result = await supabase.from("profiles").select(fields).eq("user_id", userId).maybeSingle();
+    if (!result.error) {
+      return { data: (result.data as Record<string, unknown> | null) ?? null, error: null };
+    }
+    lastError = result.error;
+    if (
+      !isMissingColumnError(result.error, "full_name") &&
+      !isMissingColumnError(result.error, "first_name") &&
+      !isMissingColumnError(result.error, "last_name")
+    ) {
+      return { data: null, error: result.error };
+    }
+    logMissingColumn("profiles.select", result.error, {
+      table: "profiles",
+      fields,
+      userId: String(userId),
+    });
+  }
+  return { data: null, error: lastError };
 }
 
 export async function resolveSessionUser(
@@ -194,10 +279,19 @@ function buildUserResponse(
   profileData: Record<string, unknown> | null | undefined,
   addresses: UserAddressRow[]
 ): ProfileUser {
+  const profileFirstName = (profileData?.first_name as string | null | undefined) ?? data.first_name ?? null;
+  const profileLastName = (profileData?.last_name as string | null | undefined) ?? data.last_name ?? null;
+  const profileFullName = composeFullName(
+    profileFirstName,
+    profileLastName,
+    (profileData?.full_name as string | null | undefined) ?? data.full_name ?? null
+  );
   return {
     ...data,
     username: data.username,
-    full_name: data.full_name ?? null,
+    first_name: profileFirstName,
+    last_name: profileLastName,
+    full_name: profileFullName,
     avatar_url: (profileData?.avatar_url as string | null | undefined) ?? null,
     phone: (profileData?.phone as string | null | undefined) ?? null,
     gender: (profileData?.gender as string | null | undefined) ?? null,
@@ -219,11 +313,7 @@ export async function loadCustomerProfileForSession(
   const uid = userIdForDbQuery(data.id);
 
   const [{ data: profileData, error: profileError }, addresses] = await Promise.all([
-    supabase
-      .from("profiles")
-      .select(PROFILE_FIELDS)
-      .eq("user_id", uid)
-      .maybeSingle(),
+    selectProfileWithFallback(supabase, uid),
     fetchUserAddresses(supabase, data.id),
   ]);
 
@@ -253,19 +343,32 @@ export async function loadCustomerProfileForSession(
         {
           user_id: uid,
           username: data.username,
+          first_name: data.first_name ?? null,
+          last_name: data.last_name ?? null,
           full_name: data.full_name ?? null,
         },
         { onConflict: "user_id" }
       )
-      .select(PROFILE_FIELDS)
+      .select(PROFILE_SELECT_ATTEMPTS[0])
       .maybeSingle();
-    if (backfillError && !isMissingProfilesTable(backfillError)) {
-      return { error: backfillError.message || "Could not load profile details.", status: 400, user: null };
+    const normalizedBackfilledProfile =
+      backfillError && (isMissingColumnError(backfillError, "first_name") || isMissingColumnError(backfillError, "last_name"))
+        ? await selectProfileWithFallback(supabase, uid)
+        : { data: backfilledProfile as Record<string, unknown> | null, error: backfillError };
+    if (backfillError && isMissingColumnError(backfillError)) {
+      logMissingColumn("profiles.upsert", backfillError, {
+        table: "profiles",
+        userId: String(uid),
+        attemptedColumns: ["username", "first_name", "last_name", "full_name"],
+      });
+    }
+    if (normalizedBackfilledProfile.error && !isMissingProfilesTable(normalizedBackfilledProfile.error)) {
+      return { error: normalizedBackfilledProfile.error.message || "Could not load profile details.", status: 400, user: null };
     }
     return {
       error: null,
       status: 200,
-      user: buildUserResponse(data, backfilledProfile ?? undefined, addresses),
+      user: buildUserResponse(data, normalizedBackfilledProfile.data ?? undefined, addresses),
     };
   }
 

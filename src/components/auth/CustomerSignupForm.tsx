@@ -8,7 +8,8 @@ import { setAuthFlash } from "@/lib/authFlash";
 export default function CustomerSignupForm() {
   const router = useRouter();
   const [username, setUsername] = useState("");
-  const [fullName, setFullName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -24,10 +25,16 @@ export default function CustomerSignupForm() {
 
     const normalizedEmail = email.trim().toLowerCase();
     const trimmedUsername = username.trim().toLowerCase();
-    const trimmedFullName = fullName.trim();
+    const trimmedFirstName = firstName.trim();
+    const trimmedLastName = lastName.trim();
 
-    if (!trimmedFullName || trimmedFullName.length < 2) {
-      setError("Please enter your full name.");
+    if (!trimmedFirstName || trimmedFirstName.length < 2) {
+      setError("Please enter your first name.");
+      setLoading(false);
+      return;
+    }
+    if (!trimmedLastName || trimmedLastName.length < 1) {
+      setError("Please enter your last name.");
       setLoading(false);
       return;
     }
@@ -51,7 +58,8 @@ export default function CustomerSignupForm() {
           email: normalizedEmail,
           password,
           confirmPassword,
-          fullName: trimmedFullName,
+          firstName: trimmedFirstName,
+          lastName: trimmedLastName,
         }),
       });
       const payload = (await res.json().catch(() => ({}))) as {
@@ -114,14 +122,28 @@ export default function CustomerSignupForm() {
         </label>
 
         <label className="block space-y-1.5">
-          <span className="text-sm font-medium text-umber/85">Full name</span>
+          <span className="text-sm font-medium text-umber/85">First name</span>
           <input
             type="text"
-            autoComplete="name"
-            value={fullName}
-            onChange={(event) => setFullName(event.target.value)}
-            placeholder="Jane Pawson"
+            autoComplete="given-name"
+            value={firstName}
+            onChange={(event) => setFirstName(event.target.value)}
+            placeholder="Jane"
             minLength={2}
+            className="w-full rounded-2xl border border-amber-200/80 bg-cream px-3.5 py-3 text-sm text-umber outline-none transition focus:border-sage focus:bg-white"
+            required
+          />
+        </label>
+
+        <label className="block space-y-1.5">
+          <span className="text-sm font-medium text-umber/85">Last name</span>
+          <input
+            type="text"
+            autoComplete="family-name"
+            value={lastName}
+            onChange={(event) => setLastName(event.target.value)}
+            placeholder="Pawson"
+            minLength={1}
             className="w-full rounded-2xl border border-amber-200/80 bg-cream px-3.5 py-3 text-sm text-umber outline-none transition focus:border-sage focus:bg-white"
             required
           />

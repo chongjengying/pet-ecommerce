@@ -35,6 +35,10 @@ function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+function composeFullName(firstName: string | null, lastName: string | null, legacyFullName: string | null): string | null {
+  return [firstName, lastName].filter(Boolean).join(" ").trim() || legacyFullName || null;
+}
+
 function getResendKey(sessionSub: string | null, email: string): string {
   return sessionSub ? `user:${sessionSub}` : `email:${email}`;
 }
@@ -128,7 +132,7 @@ export async function POST(request: Request) {
 
     const { data: matchedUser, error: lookupError } = await supabase
       .from("users")
-      .select("id,email,username,full_name,role")
+      .select("id,email,username,first_name,last_name,role")
       .ilike("email", email)
       .order("id", { ascending: true })
       .limit(1)
@@ -149,7 +153,13 @@ export async function POST(request: Request) {
       id: String(matchedUser.id),
       email: String(matchedUser.email ?? "").trim().toLowerCase(),
       username: String(matchedUser.username ?? ""),
-      full_name: typeof matchedUser.full_name === "string" ? matchedUser.full_name : null,
+      first_name: typeof matchedUser.first_name === "string" ? matchedUser.first_name : null,
+      last_name: typeof matchedUser.last_name === "string" ? matchedUser.last_name : null,
+      full_name: composeFullName(
+        typeof matchedUser.first_name === "string" ? matchedUser.first_name : null,
+        typeof matchedUser.last_name === "string" ? matchedUser.last_name : null,
+        null
+      ),
       role: typeof matchedUser.role === "string" ? matchedUser.role : "customer",
     };
   }

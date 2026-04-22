@@ -5,6 +5,7 @@ import {
   isMissingProfilesTable,
   loadCustomerProfileForSession,
   resolveSessionUser,
+  selectProfileWithFallback,
   selectUsersWithRoleFallback,
   type ResolvedUser,
 } from "@/lib/customerProfile";
@@ -16,9 +17,9 @@ import {
   upsertDefaultUserAddress,
 } from "@/lib/userAddressDb";
 import { userIdForDbQuery } from "@/lib/userIdDb";
-const PROFILE_FIELDS = "id, user_id, username, full_name, avatar_url, phone, gender, dob";
-
 type ProfileRequestBody = {
+  first_name?: unknown;
+  last_name?: unknown;
   full_name?: unknown;
   avatar_url?: unknown;
   phone?: unknown;
@@ -260,9 +261,14 @@ export async function PUT(request: Request) {
   const has = (key: keyof typeof body) => Object.prototype.hasOwnProperty.call(body, key);
   const userUpdatePayload: Record<string, unknown> = {};
   const profileExtras: Record<string, unknown> = {};
+  const firstName = has("first_name") ? cleanString(body.first_name) : resolvedUser.first_name;
+  const lastName = has("last_name") ? cleanString(body.last_name) : resolvedUser.last_name;
 
-  if (has("full_name")) {
-    userUpdatePayload.full_name = cleanString(body.full_name);
+  if (has("first_name")) {
+    userUpdatePayload.first_name = firstName;
+  }
+  if (has("last_name")) {
+    userUpdatePayload.last_name = lastName;
   }
   if (has("avatar_url")) {
     profileExtras.avatar_url = cleanString(body.avatar_url);
@@ -330,12 +336,14 @@ export async function PUT(request: Request) {
       {
         user_id: userIdKey,
         username: canonicalUser.username,
+        first_name: canonicalUser.first_name ?? null,
+        last_name: canonicalUser.last_name ?? null,
         full_name: canonicalUser.full_name,
         ...profileExtras,
       },
       { onConflict: "user_id" }
     )
-    .select(PROFILE_FIELDS)
+    .select("id, user_id, username, first_name, last_name, full_name, avatar_url, phone, gender, dob")
     .maybeSingle();
   if (profileUpsertError) {
     if (isMissingProfilesTable(profileUpsertError)) {
@@ -370,11 +378,7 @@ export async function PUT(request: Request) {
 
   if (!profilesTableMissing && !profileData) {
     const uid = userIdForDbQuery(refreshedUser.id);
-    const { data: profileReadData, error: profileReadError } = await supabase
-      .from("profiles")
-      .select(PROFILE_FIELDS)
-      .eq("user_id", uid)
-      .maybeSingle();
+    const { data: profileReadData, error: profileReadError } = await selectProfileWithFallback(supabase, uid);
     if (profileReadError && !isMissingProfilesTable(profileReadError)) {
       return NextResponse.json({ error: profileReadError.message || "Could not load profile details." }, { status: 400 });
     }
@@ -389,6 +393,8 @@ export async function PUT(request: Request) {
     user: {
       ...refreshedUser,
       username: refreshedUser.username,
+      first_name: refreshedUser.first_name ?? (profileData?.first_name as string | null | undefined) ?? null,
+      last_name: refreshedUser.last_name ?? (profileData?.last_name as string | null | undefined) ?? null,
       full_name: refreshedUser.full_name ?? null,
       avatar_url: profilesTableMissing ? null : (profileData?.avatar_url as string | null | undefined) ?? null,
       phone: profilesTableMissing ? null : (profileData?.phone as string | null | undefined) ?? null,

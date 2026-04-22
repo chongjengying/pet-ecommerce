@@ -183,11 +183,15 @@ export async function createOrder(
         ? error.message
         : (error as { message?: string }).message ?? JSON.stringify(error);
 
-    const missingColumnMatch = message.match(/Could not find the '([^']+)' column/i);
-    const missingColumn = missingColumnMatch?.[1];
+    const missingColumn = parseMissingColumn(error);
     if (!missingColumn || !(missingColumn in insertPayload)) {
       throw new Error(message);
     }
+    logMissingColumn("orders.insert", error, {
+      table: "orders",
+      attempt: attempt + 1,
+      removableColumns: Object.keys(insertPayload),
+    });
     delete insertPayload[missingColumn];
   }
 
@@ -257,7 +261,32 @@ function toError(value: unknown): Error {
   return new Error(typeof value === "string" ? value : "Failed to load orders");
 }
 
+function errorCode(value: unknown): string | null {
+  const code = (value as { code?: unknown })?.code;
+  return typeof code === "string" && code.trim().length > 0 ? code : null;
+}
+
+function parseMissingColumn(error: unknown): string | null {
+  const message = toError(error).message;
+  return (
+    message.match(/Could not find the '([^']+)' column/i)?.[1] ??
+    message.match(/column ["']?([a-zA-Z0-9_]+)["']? does not exist/i)?.[1] ??
+    null
+  );
+}
+
+function logMissingColumn(context: string, error: unknown, details: Record<string, unknown>) {
+  console.warn(`[schema-fallback] ${context}`, {
+    code: errorCode(error),
+    missingColumn: parseMissingColumn(error),
+    message: toError(error).message,
+    ...details,
+  });
+}
+
 function isMissingColumnError(err: unknown): boolean {
+  const code = String((err as { code?: string })?.code ?? "").toLowerCase();
+  if (code === "42703" || code === "pgrst204") return true;
   const msg = toError(err).message.toLowerCase();
   return (
     msg.includes("does not exist") ||
@@ -295,6 +324,10 @@ export async function getOrders(): Promise<OrderRow[]> {
     if (!isMissingColumnError(error)) {
       throw toError(error);
     }
+    logMissingColumn("orders.select", error, {
+      table: "orders",
+      select,
+    });
   }
 
   throw toError(lastError);

@@ -1,29 +1,38 @@
--- Payment method catalog + structured payment tracking.
--- Safe to run repeatedly in Supabase SQL Editor.
+-- Payment methods + payments schema.
+-- Safe to run multiple times.
+
+create extension if not exists pgcrypto;
 
 create table if not exists public.payment_methods (
-  code text primary key,
-  display_name text not null,
-  provider text not null,
-  category text not null default 'gateway'
-    check (category in ('gateway', 'bnpl', 'bank_transfer')),
-  description text null,
-  logo_key text null,
-  supported_brands jsonb not null default '[]'::jsonb,
-  sort_order integer not null default 0,
+  id uuid primary key default gen_random_uuid(),
+  code text not null unique check (
+    code in (
+      'card',
+      'paypal',
+      'apple_pay',
+      'google_pay',
+      'cod',
+      'bank_transfer'
+    )
+  ),
+  name text not null,
+  provider text not null check (
+    provider in (
+      'stripe',
+      'paypal',
+      'manual'
+    )
+  ),
   is_active boolean not null default true,
-  metadata jsonb not null default '{}'::jsonb,
+  sort_order integer not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
-create unique index if not exists idx_payment_methods_provider_code
-  on public.payment_methods(provider, code);
-
 create index if not exists idx_payment_methods_active_sort
-  on public.payment_methods(is_active, sort_order, display_name);
+  on public.payment_methods(is_active, sort_order);
 
-create or replace function public.set_payment_methods_updated_at()
+create or replace function public.set_timestamp_updated_at()
 returns trigger
 language plpgsql
 as $$
@@ -37,110 +46,119 @@ drop trigger if exists trg_payment_methods_updated_at on public.payment_methods;
 create trigger trg_payment_methods_updated_at
 before update on public.payment_methods
 for each row
-execute function public.set_payment_methods_updated_at();
+execute function public.set_timestamp_updated_at();
 
-insert into public.payment_methods (
-  code,
-  display_name,
-  provider,
-  category,
-  description,
-  logo_key,
-  supported_brands,
-  sort_order,
-  is_active,
-  metadata
-)
+insert into public.payment_methods (code, name, provider, is_active, sort_order)
 values
-  (
-    'adaptis_gateway',
-    'ADAPTIS Payment Gateway (formerly iPay88)',
-    'adaptis',
-    'gateway',
-    'Redirects the customer to ADAPTIS to complete payment.',
-    'adaptis',
-    '["VISA","MC","FPX","TnG"]'::jsonb,
-    10,
-    true,
-    '{"redirect": true, "supports_card": true, "supports_fpx": true}'::jsonb
-  ),
-  (
-    'grab',
-    'Grab',
-    'grab',
-    'bnpl',
-    'Pay today or later at 0% interest.',
-    'grab',
-    '["Grab","VISA","MC","AMEX"]'::jsonb,
-    20,
-    true,
-    '{"redirect": true, "supports_bnpl": true}'::jsonb
-  ),
-  (
-    'bank_transfer',
-    'Cash Deposit / Online Transfer',
-    'bank_transfer',
-    'bank_transfer',
-    'Manual transfer or cash deposit with bank proof upload later.',
-    'bank_transfer',
-    '[]'::jsonb,
-    30,
-    true,
-    '{"manual_review": true}'::jsonb
-  )
-on conflict (code) do update set
-  display_name = excluded.display_name,
+  ('card', 'Credit/Debit Card', 'stripe', true, 10),
+  ('paypal', 'PayPal', 'paypal', true, 20),
+  ('apple_pay', 'Apple Pay', 'stripe', true, 30),
+  ('google_pay', 'Google Pay', 'stripe', true, 40),
+  ('cod', 'Cash on Delivery', 'manual', true, 50),
+  ('bank_transfer', 'Bank Transfer', 'manual', true, 60)
+on conflict (code) do update
+set
+  name = excluded.name,
   provider = excluded.provider,
-  category = excluded.category,
-  description = excluded.description,
-  logo_key = excluded.logo_key,
-  supported_brands = excluded.supported_brands,
-  sort_order = excluded.sort_order,
   is_active = excluded.is_active,
-  metadata = excluded.metadata;
+  sort_order = excluded.sort_order;
 
-alter table public.payments
-  add column if not exists payment_method_code text null,
-  add column if not exists payment_provider text null,
-  add column if not exists payment_channel text null,
-  add column if not exists payment_method_snapshot jsonb null;
+create table if not exists public.payments (
+  id uuid primary key default gen_random_uuid(),
 
-alter table public.payments
-  drop constraint if exists payments_payment_method_code_fkey;
+  order_id uuid not null,
+  payment_method_id uuid null,
 
-alter table public.payments
-  add constraint payments_payment_method_code_fkey
-  foreign key (payment_method_code)
-  references public.payment_methods(code)
-  on delete set null;
+  provider text not null check (
+    provider in ('stripe', 'paypal')
+  ),
 
-create index if not exists idx_payments_payment_method_code
-  on public.payments(payment_method_code);
+  transaction_reference text null,
+  payment_intent_reference text null,
+  provider_customer_reference text null,
 
-create index if not exists idx_payments_payment_provider
-  on public.payments(payment_provider);
+  amount numeric(12,2) not null check (amount >= 0),
+  currency text not null default 'MYR',
 
-create index if not exists idx_payments_payment_channel
-  on public.payments(payment_channel);
+  status text not null default 'pending' check (
+    status in (
+      'pending',
+      'authorized',
+      'paid',
+      'failed',
+      'refunded',
+      'partially_refunded'
+    )
+  ),
 
--- Optional order-side projection for easier reporting and dashboards.
-alter table public.orders
-  add column if not exists payment_method_code text null,
-  add column if not exists payment_provider text null,
-  add column if not exists payment_snapshot jsonb null;
+  failure_reason text null,
+  gateway_response jsonb null,
+  refund_amount numeric(12,2) not null default 0,
+  refunded_at timestamptz null,
+  receipt_url text null,
+  metadata jsonb null,
 
-alter table public.orders
-  drop constraint if exists orders_payment_method_code_fkey;
+  paid_at timestamptz null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
 
-alter table public.orders
-  add constraint orders_payment_method_code_fkey
-  foreign key (payment_method_code)
-  references public.payment_methods(code)
-  on delete set null;
+drop trigger if exists trg_payments_updated_at on public.payments;
+create trigger trg_payments_updated_at
+before update on public.payments
+for each row
+execute function public.set_timestamp_updated_at();
 
-create index if not exists idx_orders_payment_method_code
-  on public.orders(payment_method_code);
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'payments'
+      and column_name = 'order_id'
+      and udt_name = 'uuid'
+  ) and exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'orders'
+      and column_name = 'id'
+      and udt_name = 'uuid'
+  ) then
+    alter table public.payments
+      drop constraint if exists payments_order_id_fkey,
+      add constraint payments_order_id_fkey
+      foreign key (order_id) references public.orders(id) on delete cascade;
+  else
+    raise notice 'Skipped payments_order_id_fkey: orders.id or payments.order_id is missing/not uuid.';
+  end if;
 
-create index if not exists idx_orders_payment_provider
-  on public.orders(payment_provider);
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'payments'
+      and column_name = 'payment_method_id'
+      and udt_name = 'uuid'
+  ) and exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'payment_methods'
+      and column_name = 'id'
+      and udt_name = 'uuid'
+  ) then
+    alter table public.payments
+      drop constraint if exists payments_payment_method_id_fkey,
+      add constraint payments_payment_method_id_fkey
+      foreign key (payment_method_id) references public.payment_methods(id) on delete set null;
+  else
+    raise notice 'Skipped payments_payment_method_id_fkey: payment_methods.id or payments.payment_method_id is missing/not uuid.';
+  end if;
+end $$;
 
+create index if not exists idx_payments_order_id on public.payments(order_id);
+create index if not exists idx_payments_payment_method_id on public.payments(payment_method_id);
+create index if not exists idx_payments_status on public.payments(status);
+create index if not exists idx_payments_created_at_desc on public.payments(created_at desc);

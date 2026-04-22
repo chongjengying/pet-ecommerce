@@ -17,6 +17,8 @@ type ProfileUser = {
   id: string;
   email: string;
   username: string;
+  first_name: string | null;
+  last_name: string | null;
   full_name: string | null;
   role?: string | null;
   avatar_url?: string | null;
@@ -214,7 +216,8 @@ export default function ProfileClient({
     setSuccess(null);
 
     const payload: Record<string, string> = {
-      full_name: formData.get("full_name")?.toString() ?? "",
+      first_name: formData.get("first_name")?.toString() ?? "",
+      last_name: formData.get("last_name")?.toString() ?? "",
       phone: formData.get("phone")?.toString() ?? "",
       gender: formData.get("gender")?.toString() ?? "",
       dob: formData.get("dob")?.toString() ?? "",
@@ -291,8 +294,9 @@ export default function ProfileClient({
   };
 
   const userHandle = displayUsername(user?.username);
-  const greetingName = user?.full_name?.trim() || userHandle;
-  const initials = getAvatarInitials(user?.full_name ?? null, user?.username?.replace(/^@+/, "") ?? "");
+  const personalName = [user?.first_name?.trim(), user?.last_name?.trim()].filter(Boolean).join(" ").trim();
+  const greetingName = personalName || user?.full_name?.trim() || userHandle;
+  const initials = getAvatarInitials(personalName || user?.full_name ?? null, user?.username?.replace(/^@+/, "") ?? "");
   const shippingAddress = user ? defaultShippingAddress(user) : null;
   const selectedGender = normalizeGender(user?.gender);
   const selectedAddressLabel = normalizeAddressLabel(shippingAddress?.label);
@@ -321,7 +325,7 @@ export default function ProfileClient({
     return {
       addressSummary: formatAddressSummary(shippingAddress),
       checkoutReady: hasCompleteShippingAddress(shippingAddress),
-      contactReady: hasValue(user.full_name) && hasValue(user.phone),
+      contactReady: (hasValue(user.first_name) || hasValue(user.last_name) || hasValue(user.full_name)) && hasValue(user.phone),
     };
   }, [shippingAddress, user]);
   const heroChips = [
@@ -519,13 +523,24 @@ export default function ProfileClient({
 
           <div className="mt-6 grid gap-5 sm:grid-cols-2">
             <label className="block space-y-1.5 sm:col-span-1">
-              <span className="text-sm font-medium text-umber/90">Full name</span>
+              <span className="text-sm font-medium text-umber/90">First name</span>
               <input
-                name="full_name"
-                defaultValue={user.full_name ?? ""}
-                autoComplete="name"
+                name="first_name"
+                defaultValue={user.first_name ?? ""}
+                autoComplete="given-name"
                 className="w-full rounded-2xl border border-amber-200/80 bg-white px-3.5 py-2.5 text-sm text-umber shadow-sm outline-none transition placeholder:text-umber/35 focus:border-sage/70 focus:ring-2 focus:ring-sage/20"
-                placeholder="Your name"
+                placeholder="First name"
+              />
+            </label>
+
+            <label className="block space-y-1.5 sm:col-span-1">
+              <span className="text-sm font-medium text-umber/90">Last name</span>
+              <input
+                name="last_name"
+                defaultValue={user.last_name ?? ""}
+                autoComplete="family-name"
+                className="w-full rounded-2xl border border-amber-200/80 bg-white px-3.5 py-2.5 text-sm text-umber shadow-sm outline-none transition placeholder:text-umber/35 focus:border-sage/70 focus:ring-2 focus:ring-sage/20"
+                placeholder="Last name"
               />
             </label>
 

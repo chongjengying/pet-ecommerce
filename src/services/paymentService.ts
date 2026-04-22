@@ -96,7 +96,33 @@ function safeMessage(error: unknown, fallback: string) {
     : fallback;
 }
 
-function isMissingColumnError(message: string): boolean {
+function errorCode(value: unknown): string | null {
+  const code = (value as { code?: unknown })?.code;
+  return typeof code === "string" && code.trim().length > 0 ? code : null;
+}
+
+function parseMissingColumn(error: unknown): string | null {
+  const message = safeMessage(error, "");
+  return (
+    message.match(/Could not find the '([^']+)' column/i)?.[1] ??
+    message.match(/column ["']?([a-zA-Z0-9_]+)["']? does not exist/i)?.[1] ??
+    null
+  );
+}
+
+function logMissingColumn(context: string, error: unknown, details: Record<string, unknown>) {
+  console.warn(`[schema-fallback] ${context}`, {
+    code: errorCode(error),
+    missingColumn: parseMissingColumn(error),
+    message: safeMessage(error, "Unknown payment schema error."),
+    ...details,
+  });
+}
+
+function isMissingColumnError(error: unknown): boolean {
+  const code = String((error as { code?: string })?.code ?? "").toLowerCase();
+  if (code === "42703" || code === "pgrst204") return true;
+  const message = safeMessage(error, "");
   const m = message.toLowerCase();
   return m.includes("column") && (m.includes("does not exist") || m.includes("could not find"));
 }
@@ -132,10 +158,15 @@ export async function createPayment(input: CreatePaymentInput): Promise<PaymentR
       return normalizePaymentRow(data as Record<string, unknown>);
     }
     const message = safeMessage(error, "Could not create payment.");
-    const missingColumn = message.match(/Could not find the '([^']+)' column/i)?.[1];
-    if (!missingColumn || !(missingColumn in payload) || !isMissingColumnError(message)) {
+    const missingColumn = parseMissingColumn(error);
+    if (!missingColumn || !(missingColumn in payload) || !isMissingColumnError(error)) {
       throw new Error(message);
     }
+    logMissingColumn("payments.insert", error, {
+      table: "payments",
+      attempt: attempt + 1,
+      removableColumns: Object.keys(payload),
+    });
     delete payload[missingColumn];
   }
 
@@ -189,4 +220,3 @@ export async function updatePaymentReview(
   }
   return normalizePaymentRow(data as Record<string, unknown>);
 }
-

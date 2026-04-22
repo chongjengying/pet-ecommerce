@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import ProductsSearch from "@/components/ProductsSearch";
 import ProductCard from "@/components/ProductCard";
 import { Product } from "@/types";
@@ -24,53 +24,6 @@ function inPriceRange(price: number, range: PriceFilter): boolean {
   if (range === "100-200") return price > 100 && price <= 200;
   if (range === "200-plus") return price > 200;
   return true;
-}
-
-function isOutOfStock(product: Product): boolean {
-  const stockNum = Number(product.stock);
-  return Number.isFinite(stockNum) && stockNum <= 0;
-}
-
-function isNewArrival(product: Product, newestIds: Set<string>): boolean {
-  const badge = normalizeText(product.delivery_badge_text);
-  if (badge.includes("new")) return true;
-  return newestIds.has(String(product.id));
-}
-
-function filterProducts(
-  products: Product[],
-  keyword: string,
-  selectedSize: string,
-  selectedColor: string,
-  priceFilter: PriceFilter,
-  availabilityFilter: AvailabilityFilter,
-  newestIds: Set<string>
-): Product[] {
-  const k = keyword.trim().toLowerCase();
-  const size = normalizeText(selectedSize);
-  const color = normalizeText(selectedColor);
-
-  return products.filter((p) => {
-    const name = normalizeText(p.name);
-    const cat = normalizeText(p.category);
-    const sizeLabel = normalizeText(p.size_label ?? p.size);
-    const colorLabel = normalizeText(p.color);
-    const price = Number(p.price ?? 0);
-
-    const matchKeyword = !k || name.includes(k) || cat.includes(k);
-    const matchSize = !size || sizeLabel === size;
-    const matchColor = !color || colorLabel === color;
-    const matchPrice = inPriceRange(price, priceFilter);
-    const outOfStock = isOutOfStock(p);
-    const newArrival = isNewArrival(p, newestIds);
-    const matchAvailability =
-      availabilityFilter === "all" ||
-      (availabilityFilter === "in-stock" && !outOfStock) ||
-      (availabilityFilter === "out-of-stock" && outOfStock) ||
-      (availabilityFilter === "new-arrival" && newArrival);
-
-    return matchKeyword && matchSize && matchColor && matchPrice && matchAvailability;
-  });
 }
 
 function sortProducts(products: Product[], sortKey: SortKey, orderMap: Map<string, number>): Product[] {
@@ -101,6 +54,7 @@ export default function SearchSection({ allProducts, initialKeyword = "" }: Sear
   const [priceFilter, setPriceFilter] = useState<PriceFilter>("all");
   const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>("all");
   const [sortKey, setSortKey] = useState<SortKey>("popular");
+  const deferredKeyword = useDeferredValue(keyword);
 
   const sizeOptions = useMemo(() => {
     const values = new Set<string>();
@@ -134,18 +88,50 @@ export default function SearchSection({ allProducts, initialKeyword = "" }: Sear
     return new Set(sortedNewest.slice(0, takeCount).map((product) => String(product.id)));
   }, [allProducts, orderMap]);
 
-  const filteredProducts = useMemo(
+  const searchableProducts = useMemo(
     () =>
-      filterProducts(
-        allProducts,
-        keyword,
-        selectedSize,
-        selectedColor,
-        priceFilter,
-        availabilityFilter,
-        newestIds
-      ),
-    [allProducts, keyword, selectedSize, selectedColor, priceFilter, availabilityFilter, newestIds]
+      allProducts.map((product) => {
+        const price = Number(product.price ?? 0);
+        const stockNum = Number(product.stock);
+        const outOfStock = Number.isFinite(stockNum) && stockNum <= 0;
+        const badge = normalizeText(product.delivery_badge_text);
+        const newArrival = badge.includes("new") || newestIds.has(String(product.id));
+        return {
+          product,
+          name: normalizeText(product.name),
+          category: normalizeText(product.category),
+          size: normalizeText(product.size_label ?? product.size),
+          color: normalizeText(product.color),
+          price,
+          outOfStock,
+          newArrival,
+        };
+      }),
+    [allProducts, newestIds]
+  );
+
+  const filteredProducts = useMemo(
+    () => {
+      const k = deferredKeyword.trim().toLowerCase();
+      const size = normalizeText(selectedSize);
+      const color = normalizeText(selectedColor);
+
+      return searchableProducts
+        .filter((entry) => {
+          const matchKeyword = !k || entry.name.includes(k) || entry.category.includes(k);
+          const matchSize = !size || entry.size === size;
+          const matchColor = !color || entry.color === color;
+          const matchPrice = inPriceRange(entry.price, priceFilter);
+          const matchAvailability =
+            availabilityFilter === "all" ||
+            (availabilityFilter === "in-stock" && !entry.outOfStock) ||
+            (availabilityFilter === "out-of-stock" && entry.outOfStock) ||
+            (availabilityFilter === "new-arrival" && entry.newArrival);
+          return matchKeyword && matchSize && matchColor && matchPrice && matchAvailability;
+        })
+        .map((entry) => entry.product);
+    },
+    [deferredKeyword, selectedSize, selectedColor, priceFilter, availabilityFilter, searchableProducts]
   );
 
   const displayProducts = useMemo(

@@ -24,6 +24,7 @@ export const headerConfig = {
   navLinks: [
     { href: "/", label: "Home" },
     { href: "/products", label: "Categories" },
+    { href: "/catalog", label: "Catalog" },
     { href: "/grooming", label: "Grooming" },
   ],
   auth: {

@@ -5,6 +5,93 @@ import type { Product } from "@/types"
 
 type ProductRow = Record<string, unknown> & { id?: string | number }
 
+const PRODUCT_LIST_COLUMNS = [
+  "id",
+  "name",
+  "price",
+  "category",
+  "category_id",
+  "categoryid",
+  "stock",
+  "image",
+  "image_url",
+  "brand",
+  "brand_name",
+  "compare_at_price",
+  "compare_price",
+  "original_price",
+  "size_label",
+  "size",
+  "item_size",
+  "color",
+  "colour",
+  "delivery_badge_text",
+]
+
+function parseMissingColumn(error: unknown): string | null {
+  const message =
+    typeof (error as { message?: unknown })?.message === "string"
+      ? (error as { message: string }).message
+      : ""
+  const fromPostgrest = message.match(/Could not find the '([^']+)' column/i)?.[1]
+  if (fromPostgrest) return fromPostgrest
+
+  const fromPostgres = message.match(/column\s+([a-zA-Z0-9_."]+)\s+does not exist/i)?.[1]
+  if (!fromPostgres) return null
+
+  const normalized = fromPostgres.replace(/"/g, "")
+  const parts = normalized.split(".")
+  return parts[parts.length - 1] ?? null
+}
+
+function isMissingColumnError(error: unknown): boolean {
+  const code = String((error as { code?: string })?.code ?? "").toLowerCase()
+  if (code === "42703" || code === "pgrst204") return true
+  const message =
+    typeof (error as { message?: unknown })?.message === "string"
+      ? (error as { message: string }).message.toLowerCase()
+      : ""
+  return (
+    message.includes("column") &&
+    (message.includes("does not exist") || message.includes("could not find"))
+  )
+}
+
+async function selectProductsWithFallback(
+  buildQuery: (selectColumns: string) => PromiseLike<{ data: unknown; error: unknown }>
+): Promise<ProductRow[]> {
+  const columns = [...PRODUCT_LIST_COLUMNS]
+  let lastError: unknown = null
+
+  for (let attempt = 0; attempt < PRODUCT_LIST_COLUMNS.length; attempt++) {
+    const selectColumns = columns.join(",")
+    const { data, error } = await buildQuery(selectColumns)
+    if (!error) return (Array.isArray(data) ? data : []) as ProductRow[]
+
+    lastError = error
+    const missingColumn = parseMissingColumn(error)
+    if (!isMissingColumnError(error) || !missingColumn) {
+      throw error
+    }
+    const index = columns.indexOf(missingColumn)
+    if (index < 0) {
+      throw error
+    }
+    columns.splice(index, 1)
+    if (columns.length === 0) {
+      throw error
+    }
+    if (process.env.NODE_ENV !== "production") {
+      console.warn("[productService] Removed missing column from products select", {
+        missingColumn,
+        attempt: attempt + 1,
+      })
+    }
+  }
+
+  throw (lastError as Error) ?? new Error("Could not load products due to schema mismatch.")
+}
+
 /**
  * PDP text fields may be `text` or `jsonb` in Postgres; Supabase returns strings,
  * objects, or arrays. Strict `typeof === "string"` checks drop valid DB values.
@@ -105,11 +192,23 @@ function chooseBestImageUrl(rows: Array<Record<string, unknown>>): string | null
 async function attachProductImages(rows: ProductRow[]) {
   const debugImageSync = process.env.NODE_ENV !== "production"
   const list = Array.isArray(rows) ? rows : []
+  const hasInlineImage = (row: ProductRow) => {
+    const imageUrl = typeof row?.image_url === "string" ? row.image_url.trim() : ""
+    if (imageUrl) return true
+    const image = typeof row?.image === "string" ? row.image.trim() : ""
+    return Boolean(image)
+  }
+  if (list.length > 0 && list.every((row) => hasInlineImage(row))) {
+    return list
+  }
+
   const ids = list
     .map((p) => p?.id)
     .filter((id): id is string | number => id != null && id !== "")
+  const uniqueIds = Array.from(new Set(ids.map((id) => String(id))))
+    .map((id) => (/^\d+$/.test(id) ? Number(id) : id))
 
-  if (ids.length === 0) return list
+  if (uniqueIds.length === 0) return list
 
   // Fetch images from known table names and merge onto products as image_url.
   // Supabase defaults to the "public" schema.
@@ -121,13 +220,13 @@ async function attachProductImages(rows: ProductRow[]) {
     const { data, error } = await supabase
       .from(table)
       .select("product_id,image_url,is_main,sort_order")
-      .in("product_id", ids as (string | number)[])
+      .in("product_id", uniqueIds as (string | number)[])
 
     if (!error && Array.isArray(data)) {
       if (debugImageSync) {
         console.log("[productService] image table fetch success", {
           table,
-          requestedProductIds: ids.length,
+          requestedProductIds: uniqueIds.length,
           rows: data.length,
           sample: data.slice(0, 3).map((row) => ({
             product_id: row.product_id,
@@ -193,11 +292,26 @@ async function attachProductImages(rows: ProductRow[]) {
 
 async function attachCategoryNames(rows: ProductRow[]) {
   const list = Array.isArray(rows) ? rows : []
+  const rowNeedsCategoryLookup = (row: ProductRow) => {
+    const rawId = row?.category_id ?? row?.categoryid
+    if (rawId == null || rawId === "") return false
+    const id = String(rawId)
+    const category = typeof row?.category === "string" ? row.category.trim() : ""
+    return !category || category === id
+  }
+
+  if (list.length > 0 && list.every((row) => !rowNeedsCategoryLookup(row))) {
+    return list
+  }
+
   const categoryIds = list
+    .filter((p) => rowNeedsCategoryLookup(p))
     .map((p) => p?.category_id ?? p?.categoryid)
     .filter((id): id is string | number => id != null && id !== "")
+  const uniqueCategoryIds = Array.from(new Set(categoryIds.map((id) => String(id))))
+    .map((id) => (/^\d+$/.test(id) ? Number(id) : id))
 
-  if (categoryIds.length === 0) return list
+  if (uniqueCategoryIds.length === 0) return list
 
   const tables = ["categories", "category"]
   let categoryRows: Array<Record<string, unknown>> = []
@@ -207,7 +321,7 @@ async function attachCategoryNames(rows: ProductRow[]) {
     const { data, error } = await supabase
       .from(table)
       .select("id,name")
-      .in("id", categoryIds as (string | number)[])
+      .in("id", uniqueCategoryIds as (string | number)[])
 
     if (!error && Array.isArray(data)) {
       categoryRows = data as Array<Record<string, unknown>>
@@ -350,12 +464,10 @@ async function fetchProductGalleryUrls(productId: string | number): Promise<stri
 }
 
 export async function getProducts(): Promise<Product[]> {
-  const { data, error } = await supabase
-    .from("products")
-    .select("*")
-
-  if (error) throw error
-  const withImages = await attachProductImages((data ?? []) as ProductRow[])
+  const rows = await selectProductsWithFallback((selectColumns) =>
+    supabase.from("products").select(selectColumns)
+  )
+  const withImages = await attachProductImages(rows)
   const withCategories = await attachCategoryNames(withImages as ProductRow[])
   return withCategories
     .map((row) => normalizeProduct(row as ProductRow))
@@ -363,12 +475,13 @@ export async function getProducts(): Promise<Product[]> {
 }
 
 export async function searchProducts(keyword: string): Promise<Product[]> {
-  const { data } = await supabase
-    .from("products")
-    .select("*")
-    .ilike("name", `%${keyword}%`)
-
-  const withImages = await attachProductImages((data ?? []) as ProductRow[])
+  const rows = await selectProductsWithFallback((selectColumns) =>
+    supabase
+      .from("products")
+      .select(selectColumns)
+      .ilike("name", `%${keyword}%`)
+  )
+  const withImages = await attachProductImages(rows)
   const withCategories = await attachCategoryNames(withImages as ProductRow[])
   return withCategories
     .map((row) => normalizeProduct(row as ProductRow))
@@ -420,7 +533,8 @@ export async function getRelatedProducts(
     .neq("id", productId as string | number)
     .limit(seedCount)
 
-  const withImages = await attachProductImages((data ?? []) as ProductRow[])
+  const seededRows = Array.isArray(data) ? (data as ProductRow[]) : []
+  const withImages = await attachProductImages(seededRows)
   const withCategories = await attachCategoryNames(withImages as ProductRow[])
   return withCategories
     .map((row) => normalizeProduct(row as ProductRow))

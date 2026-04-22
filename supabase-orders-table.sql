@@ -51,6 +51,9 @@ alter table orders add column if not exists shipping_city text null;
 alter table orders add column if not exists shipping_state text null;
 alter table orders add column if not exists shipping_postal_code text null;
 alter table orders add column if not exists shipping_country text null;
+alter table orders add column if not exists payment_method_code text null;
+alter table orders add column if not exists payment_provider text null;
+alter table orders add column if not exists payment_snapshot jsonb null;
 alter table orders add column if not exists metadata jsonb null;
 alter table orders drop column if exists discount_total;
 
@@ -160,6 +163,8 @@ alter table order_items add column if not exists product_name text not null defa
 alter table order_items add column if not exists product_sku text null;
 alter table order_items add column if not exists unit_price numeric not null default 0;
 alter table order_items add column if not exists metadata jsonb null;
+alter table order_items add column if not exists product_id integer;
+alter table order_items add column if not exists order_id uuid;
 alter table order_items drop column if exists line_subtotal;
 
 -- If older schema used "name" and "price", copy data into new columns.
@@ -185,8 +190,49 @@ begin
   end if;
 end $$;
 
-create index if not exists idx_order_items_order_id on order_items(order_id);
-create index if not exists idx_order_items_product_id on order_items(product_id);
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'order_items' and column_name = 'order_id'
+  ) then
+    execute 'create index if not exists idx_order_items_order_id on order_items(order_id)';
+  else
+    raise notice 'Skipped idx_order_items_order_id: public.order_items.order_id not found';
+  end if;
+
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'order_items' and column_name = 'product_id'
+  ) then
+    execute 'create index if not exists idx_order_items_product_id on order_items(product_id)';
+  else
+    raise notice 'Skipped idx_order_items_product_id: public.order_items.product_id not found';
+  end if;
+end $$;
+
+-- Order address snapshots (shipping + billing) at checkout time.
+create table if not exists public.order_addresses (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid not null references public.orders(id) on delete cascade,
+  address_type text not null check (address_type in ('shipping', 'billing')),
+  name text null,
+  phone text null,
+  address_line1 text null,
+  address_line2 text null,
+  city text null,
+  state text null,
+  postal_code text null,
+  country text null,
+  created_at timestamptz not null default now()
+);
+
+create unique index if not exists idx_order_addresses_order_type_unique
+  on public.order_addresses(order_id, address_type);
+create index if not exists idx_order_addresses_order_id
+  on public.order_addresses(order_id);
+create index if not exists idx_order_addresses_type
+  on public.order_addresses(address_type);
 
 -- Ensure PostgREST can resolve orders -> order_items relation even for older schemas.
 do $$
@@ -217,18 +263,51 @@ create table if not exists inventory_logs (
   note text null
 );
 
-create index if not exists idx_inventory_logs_created_at on inventory_logs(created_at desc);
-create index if not exists idx_inventory_logs_product_id on inventory_logs(product_id);
-create index if not exists idx_inventory_logs_order_id on inventory_logs(order_id);
+alter table inventory_logs add column if not exists created_at timestamptz not null default now();
+alter table inventory_logs add column if not exists product_id integer;
+alter table inventory_logs add column if not exists order_id uuid;
+
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'inventory_logs' and column_name = 'created_at'
+  ) then
+    execute 'create index if not exists idx_inventory_logs_created_at on inventory_logs(created_at desc)';
+  else
+    raise notice 'Skipped idx_inventory_logs_created_at: public.inventory_logs.created_at not found';
+  end if;
+
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'inventory_logs' and column_name = 'product_id'
+  ) then
+    execute 'create index if not exists idx_inventory_logs_product_id on inventory_logs(product_id)';
+  else
+    raise notice 'Skipped idx_inventory_logs_product_id: public.inventory_logs.product_id not found';
+  end if;
+
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'inventory_logs' and column_name = 'order_id'
+  ) then
+    execute 'create index if not exists idx_inventory_logs_order_id on inventory_logs(order_id)';
+  else
+    raise notice 'Skipped idx_inventory_logs_order_id: public.inventory_logs.order_id not found';
+  end if;
+end $$;
 
 alter table orders enable row level security;
 alter table order_items enable row level security;
+alter table order_addresses enable row level security;
 alter table inventory_logs enable row level security;
 
 drop policy if exists "Allow anon insert orders" on orders;
 drop policy if exists "Allow anon select orders" on orders;
 drop policy if exists "Allow anon insert order_items" on order_items;
 drop policy if exists "Allow anon select order_items" on order_items;
+drop policy if exists "Allow anon insert order_addresses" on order_addresses;
+drop policy if exists "Allow anon select order_addresses" on order_addresses;
 drop policy if exists "Allow anon insert inventory_logs" on inventory_logs;
 drop policy if exists "Allow anon select inventory_logs" on inventory_logs;
 
@@ -249,6 +328,16 @@ create policy "Allow anon insert order_items"
 
 create policy "Allow anon select order_items"
   on order_items for select
+  to anon
+  using (true);
+
+create policy "Allow anon insert order_addresses"
+  on order_addresses for insert
+  to anon
+  with check (true);
+
+create policy "Allow anon select order_addresses"
+  on order_addresses for select
   to anon
   using (true);
 
