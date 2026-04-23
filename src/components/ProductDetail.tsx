@@ -30,6 +30,39 @@ function toSafeImageSrc(value: string | null | undefined, productId: string | nu
   return `https://picsum.photos/400/400?random=${productId}`;
 }
 
+function sanitizeDetailText(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const cleaned = value
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return cleaned.length > 0 ? cleaned : "";
+}
+
+function toDetailText(value: unknown): string {
+  if (typeof value === "string") return sanitizeDetailText(value);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    const joined = value
+      .map((item) => (typeof item === "string" ? item : JSON.stringify(item)))
+      .join("\n");
+    return sanitizeDetailText(joined);
+  }
+  if (value && typeof value === "object") {
+    return sanitizeDetailText(JSON.stringify(value));
+  }
+  return "";
+}
+
+function pickProductDetail(source: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const text = toDetailText(source?.[key]);
+    if (text) return text;
+  }
+  return "";
+}
+
 function getStock(product: Product): number | undefined {
   if (product.stock == null) return undefined;
   const n = Number(product.stock);
@@ -40,6 +73,7 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
   const { addToCart, items } = useCart();
   const [quantity, setQuantity] = useState(1);
   const [added, setAdded] = useState(false);
+  const [addError, setAddError] = useState("");
   const [zoomOpen, setZoomOpen] = useState(false);
   const [related, setRelated] = useState<Product[]>(relatedProducts);
   const safeId = toNonEmptyText(product?.id, "unknown-product");
@@ -49,34 +83,18 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
   const safeBrand = toNonEmptyText(product?.brand, "");
   const safeDescription = toNonEmptyText(product?.description, "");
   const safeColor = toNonEmptyText(product?.color, "");
-  const safeDeliveryLabel = toNonEmptyText(product?.delivery_badge_text, "RM0 Delivery");
-  const safeProduct: Product = useMemo(
-    () => ({
-      ...product,
-      id: safeId,
-      name: safeName,
-      price: safePrice,
-      category: safeCategory,
-      brand: safeBrand || null,
-      description: safeDescription || null,
-      color: safeColor || null,
-      delivery_badge_text: safeDeliveryLabel,
-    }),
-    [product, safeCategory, safeDeliveryLabel, safeDescription, safeId, safeName, safePrice, safeBrand, safeColor]
-  );
-
   const gallery = useMemo(() => {
-    const g = safeProduct.gallery_images;
+    const g = product.gallery_images;
     if (Array.isArray(g) && g.length > 0) {
       return g.map((url) => toSafeImageSrc(url, safeId));
     }
-    return [toSafeImageSrc(resolveProductImageUrl(safeProduct), safeId)];
-  }, [safeId, safeProduct]);
+    return [toSafeImageSrc(resolveProductImageUrl(product), safeId)];
+  }, [safeId, product]);
 
   const [activeIndex, setActiveIndex] = useState(0);
   const mainImageUrl =
     gallery[Math.min(activeIndex, gallery.length - 1)] ??
-    toSafeImageSrc(resolveProductImageUrl(safeProduct), safeId);
+    toSafeImageSrc(resolveProductImageUrl(product), safeId);
   const displayRelated = relatedProducts.length > 0 ? relatedProducts : related;
 
   useEffect(() => {
@@ -101,14 +119,14 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
     };
   }, [relatedProducts, safeId]);
 
-  const stock = getStock(safeProduct);
+  const stock = getStock(product);
   const inCartQty = items.find((i) => String(i.id) === String(safeId))?.quantity ?? 0;
   const availableStock = stock !== undefined ? Math.max(0, stock - inCartQty) : undefined;
   const outOfStock = availableStock !== undefined && availableStock <= 0;
   const maxQty = availableStock !== undefined ? Math.max(0, availableStock) : undefined;
   const effectiveQty = maxQty !== undefined ? Math.min(quantity, maxQty) : quantity;
 
-  const compareAt = toFiniteNumber(safeProduct.compare_at_price, 0);
+  const compareAt = toFiniteNumber(product.compare_at_price, 0);
   const showCompare =
     compareAt > safePrice;
   const discountPct =
@@ -116,36 +134,52 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
       ? Math.max(0, Math.round((1 - safePrice / compareAt) * 100))
       : 0;
 
-  const deliveryLabel = safeDeliveryLabel;
 
   /** Matches admin “Size” / `size_label` and DB `size` / `item_size` (see normalizeProduct). */
   const sizeDisplay = useMemo(() => {
-    const s = (safeProduct.size_label ?? safeProduct.size)?.trim();
+    const s = (product.size_label ?? product.size)?.trim();
     return s && s.length > 0 ? s : "";
-  }, [safeProduct.size_label, safeProduct.size]);
+  }, [product.size_label, product.size]);
 
   const handleAddToCart = async () => {
     if (outOfStock || effectiveQty <= 0) return;
+    setAddError("");
     const ok = await addToCart(
         {
-        ...safeProduct,
-        image: resolveProductImageUrl(safeProduct),
+        ...product,
+        image: resolveProductImageUrl(product),
         category: safeCategory,
       },
       effectiveQty
     );
-    if (!ok) return;
+    if (!ok) {
+      setAddError("Quantity exceeds available stock.");
+      return;
+    }
     setAdded(true);
     setTimeout(() => setAdded(false), 2000);
   };
 
   const categoryLabel = safeCategory;
   const brandLabel = safeBrand || undefined;
+  const detailSource = useMemo(
+    () => (product as unknown as Record<string, unknown>),
+    [product]
+  );
+  const detailDescription = pickProductDetail(detailSource, ["description", "product_description", "details"]);
+  const detailBenefit = pickProductDetail(detailSource, ["benefit", "benefits", "benefit_text", "product_benefit"]);
+  const detailIngredients = pickProductDetail(detailSource, ["ingredients", "ingredient", "ingredients_text", "ingredient_list"]);
+  const detailFeeding = pickProductDetail(detailSource, [
+    "feeding_instructions",
+    "feeding_instruction",
+    "feedingInstructions",
+    "feeding",
+  ]);
 
   const expandSections = [
-    { key: "benefit", title: "Benefit", value: safeProduct.benefit },
-    { key: "ingredients", title: "Ingredients", value: safeProduct.ingredients },
-    { key: "feeding", title: "Feeding Instructions", value: safeProduct.feeding_instructions },
+    { key: "benefit", title: "Benefit", value: detailBenefit },
+    { key: "ingredients", title: "Ingredients", value: detailIngredients },
+    { key: "feeding", title: "Feeding Instructions", value: detailFeeding },
   ] as const;
 
   const sharePage = () => {
@@ -188,6 +222,7 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
                   src={mainImageUrl}
                   alt={safeName}
                   fill
+                  loading="eager"
                   className="object-contain p-4"
                   sizes="(max-width: 1024px) 100vw, 50vw"
                   priority
@@ -195,7 +230,7 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
               </div>
               <div className="pointer-events-none absolute bottom-4 left-4 flex items-center gap-2 rounded-full bg-umber/90 px-3 py-1.5 text-xs font-semibold text-cream shadow-md backdrop-blur-sm">
                 <span aria-hidden="true">🚚</span>
-                {deliveryLabel}
+                RM0 Delivery
               </div>
             </div>
 
@@ -323,6 +358,9 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
               {added ? (
                 <p className="mt-3 text-center text-xs text-sage">You can change quantities in your cart.</p>
               ) : null}
+              {addError ? (
+                <p className="mt-2 text-center text-xs text-red-600">{addError}</p>
+              ) : null}
 
               <Link
                 href="/cart"
@@ -354,17 +392,17 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
               </p>
             </div>
 
-            {safeDescription ? (
+            {(safeDescription || detailDescription) ? (
               <div className="mt-8 border-t border-amber-200/80 pt-8">
                 <h2 className="text-sm font-semibold text-umber">Description</h2>
-                <p className="mt-2 text-sm leading-relaxed text-umber/75">{safeDescription}</p>
+                <p className="mt-2 text-sm leading-relaxed text-umber/75">{safeDescription || detailDescription}</p>
               </div>
             ) : null}
 
             <div className="mt-8 border-t border-amber-200/80 pt-2">
               <h2 className="text-sm font-semibold text-umber">Product details</h2>
               {expandSections.map(({ key, title, value }) => {
-                const body = value != null && String(value).trim() ? String(value).trim() : null;
+                const body = sanitizeDetailText(value);
                 return (
                   <details
                     key={key}
@@ -383,7 +421,7 @@ export default function ProductDetail({ product, relatedProducts }: ProductDetai
                       </svg>
                     </summary>
                     <div className="mt-3 text-sm leading-relaxed text-umber/75">
-                      {body ? (
+                      {body.length > 0 ? (
                         <p className="whitespace-pre-wrap">{body}</p>
                       ) : (
                         <p className="text-umber/45 italic">No information added yet.</p>

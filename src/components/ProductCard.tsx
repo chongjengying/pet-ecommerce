@@ -13,6 +13,25 @@ function getStock(product: Product): number | undefined {
   return Number.isNaN(n) ? undefined : n;
 }
 
+function toOptionalBoolean(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return undefined;
+    if (["true", "1", "yes", "active", "enabled", "published"].includes(normalized)) return true;
+    if (["false", "0", "no", "inactive", "disabled", "draft", "archived"].includes(normalized)) return false;
+  }
+  return undefined;
+}
+
+function isProductActive(product: Product): boolean {
+  const source = product as unknown as Record<string, unknown>;
+  const statusFlag = toOptionalBoolean(source.status);
+  if (statusFlag !== undefined) return statusFlag;
+  return true;
+}
+
 function CartIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
@@ -27,6 +46,8 @@ function CartIcon({ className }: { className?: string }) {
 }
 
 export default function ProductCard({ product }: { product: Product }) {
+  if (!isProductActive(product)) return null;
+
   const { addToCart, items } = useCart();
   const [isAdding, setIsAdding] = useState(false);
   const [added, setAdded] = useState(false);
@@ -41,6 +62,7 @@ export default function ProductCard({ product }: { product: Product }) {
     (availableToBuy !== undefined && availableToBuy <= 0);
 
   const price = Number(product.price ?? 0);
+  const productPath = `/products/${encodeURIComponent(String(product.slug ?? product.id))}`;
   const lowStock =
     !outOfStock && availableToBuy !== undefined && availableToBuy > 0 && availableToBuy <= 5;
 
@@ -57,7 +79,7 @@ export default function ProductCard({ product }: { product: Product }) {
   return (
     <article className="group flex h-full flex-col overflow-hidden rounded-2xl border border-amber-200/70 bg-white shadow-[0_2px_12px_rgba(44,36,32,0.04)] ring-1 ring-black/[0.03] transition duration-300 hover:-translate-y-1 hover:shadow-[0_16px_40px_rgba(44,36,32,0.09)] hover:ring-amber-200/60">
       <Link
-        href={`/products/${product.id}`}
+        href={productPath}
         className="flex flex-1 flex-col outline-none focus-visible:ring-2 focus-visible:ring-sage/50 focus-visible:ring-offset-2"
       >
         <div className="relative aspect-square w-full overflow-hidden bg-gradient-to-b from-amber-50/90 to-cream">

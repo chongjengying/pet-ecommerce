@@ -238,12 +238,13 @@ export default function AdminProductEditForm({ product }: AdminProductEditFormPr
     }
     setSaving(true);
     try {
+      const priceValue = Number(Number(price).toFixed(2));
       const response = await fetch(`/api/admin/products/${encodeURIComponent(product.id)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name,
-          price,
+          price: priceValue,
           category,
           stock,
           image_url: imageUrl || null,

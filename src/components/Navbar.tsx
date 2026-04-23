@@ -199,6 +199,7 @@ export default function Navbar() {
   }, []);
 
   const onLogout = async () => {
+    const refreshStartedAt = Date.now();
     await fetch("/api/auth/logout", { method: "POST", cache: "no-store", credentials: "same-origin" });
     clearProfileCache();
     localStorage.removeItem("customer_jwt_token");
@@ -212,6 +213,12 @@ export default function Navbar() {
     setMenuOpen(false);
     setMobileOpen(false);
     router.replace("/auth/login");
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[router.refresh] trigger from Navbar.onLogout", {
+        at: refreshStartedAt,
+        note: "This can re-run server components and re-fetch route data.",
+      });
+    }
     router.refresh();
   };
 

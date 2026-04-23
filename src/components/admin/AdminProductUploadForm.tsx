@@ -216,12 +216,13 @@ export default function AdminProductUploadForm() {
     }
     setSaving(true);
     try {
+      const priceValue = Number(Number(price).toFixed(2));
       const response = await fetch("/api/admin/products", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name,
-          price,
+          price: priceValue,
           category,
           stock,
           image_url: imageUrl || null,

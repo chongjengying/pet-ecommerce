@@ -4,6 +4,17 @@ import { supabase } from "@/lib/supabase"
 import type { Product } from "@/types"
 
 type ProductRow = Record<string, unknown> & { id?: string | number }
+type ProductQueryOptions = {
+  page?: number
+  pageSize?: number
+}
+type SearchProductsOptions = ProductQueryOptions
+export type ProductPageResult = {
+  items: Product[]
+  page: number
+  pageSize: number
+  hasNextPage: boolean
+}
 
 export type ProductLike = {
   id: string | number
@@ -40,26 +51,18 @@ export function isValidProduct(product: Product | null | undefined): product is 
 
 const PRODUCT_LIST_COLUMNS = [
   "id",
+  "slug",
   "name",
   "price",
-  "category",
+  "thumbnail_url",
   "category_id",
-  "categoryid",
   "stock",
-  "image",
-  "image_url",
   "brand",
-  "brand_name",
-  "compare_at_price",
-  "compare_price",
-  "original_price",
-  "size_label",
   "size",
-  "item_size",
   "color",
-  "colour",
-  "delivery_badge_text",
+  "status",
 ]
+const DEFAULT_PRODUCT_PAGE_SIZE = 24
 
 function parseMissingColumn(error: unknown): string | null {
   const message =
@@ -98,6 +101,7 @@ async function selectProductsWithFallback(
 
   for (let attempt = 0; attempt < PRODUCT_LIST_COLUMNS.length; attempt++) {
     const selectColumns = columns.join(",")
+    console.log(selectColumns)
     const { data, error } = await buildQuery(selectColumns)
     if (!error) return (Array.isArray(data) ? data : []) as ProductRow[]
 
@@ -154,6 +158,53 @@ function coerceProductDetailText(...candidates: unknown[]): string | null {
     }
   }
   return null
+}
+
+function toRecordLike(value: unknown): Record<string, unknown> | null {
+  if (!value) return null
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>
+  }
+  if (typeof value === "string") {
+    const raw = value.trim()
+    if (!raw) return null
+    try {
+      const parsed = JSON.parse(raw)
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>
+      }
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
+function getDetailField(details: unknown, keys: string[]): unknown {
+  const record = toRecordLike(details)
+  if (!record) return undefined
+  for (const key of keys) {
+    if (key in record) return record[key]
+  }
+  return undefined
+}
+
+function toOptionalBoolean(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return undefined;
+    if (["true", "1", "yes", "active", "enabled", "published"].includes(normalized)) return true;
+    if (["false", "0", "no", "inactive", "disabled", "draft", "archived"].includes(normalized)) return false;
+  }
+  return undefined;
+}
+
+function isProductVisible(row: ProductRow): boolean {
+  const statusFlag = toOptionalBoolean(row?.status);
+  if (statusFlag !== undefined) return statusFlag;
+  return true;
 }
 
 type InventoryLogInput = {
@@ -392,32 +443,41 @@ async function attachCategoryNames(rows: ProductRow[]) {
 }
 
 function normalizeProduct(row: ProductRow): Product | null {
-  const id = row?.id == null ? "" : String(row.id)
-  const name = typeof row?.name === "string" ? row.name.trim() : ""
+  const id = row?.id == null ? "" : String(row.id).trim()
+  const slug =
+    row?.slug == null
+      ? null
+      : String(row.slug).trim() || null
+  const name = row?.name == null ? "" : String(row.name).trim()
   const priceNum = Number(row?.price)
 
   if (!id || !name || !Number.isFinite(priceNum)) return null
 
-  const image = typeof row?.image === "string" ? row.image : undefined
-  const image_url = typeof row?.image_url === "string" ? row.image_url : undefined
+  const image =
+    typeof row?.image === "string"
+      ? row.image.trim()
+      : typeof row?.thumbnail_url === "string"
+        ? row.thumbnail_url.trim()
+        : undefined
+  const image_url =
+    typeof row?.image_url === "string"
+      ? row.image_url.trim()
+      : typeof row?.thumbnail_url === "string"
+        ? row.thumbnail_url.trim()
+        : undefined
   const description = coerceProductDetailText(row?.description)
   const category =
-    typeof row?.category === "string"
-      ? row.category
+    row?.category != null && String(row.category).trim()
+      ? String(row.category).trim()
       : (row?.category_id ?? row?.categoryid) == null
         ? undefined
-        : String(row?.category_id ?? row?.categoryid)
+        : String(row?.category_id ?? row?.categoryid).trim() || undefined
   const stockNum = Number(row?.stock)
   const stock = Number.isFinite(stockNum) ? stockNum : undefined
 
   const brandRaw = row?.brand ?? row?.brand_name
   const brand =
     brandRaw != null && String(brandRaw).trim() ? String(brandRaw).trim() : null
-
-  const compareRaw = row?.compare_at_price ?? row?.compare_price ?? row?.original_price
-  const compareNum = Number(compareRaw)
-  const compare_at_price =
-    Number.isFinite(compareNum) && compareNum > 0 ? compareNum : null
 
   const sizeRaw = row?.size_label ?? row?.size ?? row?.item_size
   const size_label =
@@ -427,20 +487,36 @@ function normalizeProduct(row: ProductRow): Product | null {
   const color =
     colorRaw != null && String(colorRaw).trim() ? String(colorRaw).trim() : null
 
+  const productDetails = row?.product_details
   const benefit = coerceProductDetailText(
     row?.benefit,
     row?.benefits,
-    row?.benefit_text
+    row?.benefit_text,
+    row?.product_benefit,
+    getDetailField(productDetails, ["benefit", "benefits", "benefit_text"])
   )
   const ingredients = coerceProductDetailText(
     row?.ingredients,
     row?.ingredient,
-    row?.ingredients_text
+    row?.ingredients_text,
+    row?.ingredient_list,
+    getDetailField(productDetails, ["ingredients", "ingredient", "ingredients_text"])
   )
-  const analysis = coerceProductDetailText(row?.analysis)
+  const analysis = coerceProductDetailText(
+    row?.analysis,
+    getDetailField(productDetails, ["analysis"])
+  )
   const feeding_instructions = coerceProductDetailText(
     row?.feeding_instructions,
-    row?.feeding_instruction
+    row?.feeding_instruction,
+    row?.feed_instruction,
+    getDetailField(productDetails, [
+      "feeding_instructions",
+      "feeding_instruction",
+      "feed_instruction",
+      "feedingInstructions",
+      "feeding",
+    ])
   )
   const delivery_badge_text =
     row?.delivery_badge_text == null
@@ -451,15 +527,15 @@ function normalizeProduct(row: ProductRow): Product | null {
 
   return {
     id,
+    slug,
     name,
-    price: priceNum,
-    image,
-    image_url,
+    price: Math.max(0, priceNum),
+    image: image || undefined,
+    image_url: image_url || undefined,
     description,
     category,
     stock,
     brand,
-    compare_at_price,
     size_label,
     size: size_label,
     color,
@@ -496,47 +572,117 @@ async function fetchProductGalleryUrls(productId: string | number): Promise<stri
   return Array.from(new Set(urls))
 }
 
-export async function getProducts(): Promise<Product[]> {
-  const rows = await selectProductsWithFallback((selectColumns) =>
-    supabase.from("products").select(selectColumns)
-  )
-  const withImages = await attachProductImages(rows)
-  const withCategories = await attachCategoryNames(withImages as ProductRow[])
-  return withCategories
+async function fetchProductDetailsRow(productId: string | number, db = supabase): Promise<ProductRow | null> {
+  const { data, error } = await db
+    .from("product_details")
+    .select("*")
+    .eq("product_id", productId)
+    .limit(1)
+
+  if (!error && Array.isArray(data) && data.length > 0) {
+    const first = data[0]
+    if (!first || typeof first !== "object") return null
+    return first as ProductRow
+  }
+
+  if (typeof productId !== "string") return null
+
+  const slug = productId.trim()
+  if (!slug) return null
+
+  const { data: slugData, error: slugError } = await db
+    .from("product_details")
+    .select("*")
+    .eq("slug", slug)
+    .limit(1)
+
+  if (slugError || !Array.isArray(slugData) || slugData.length === 0) return null
+  const first = slugData[0]
+  if (!first || typeof first !== "object") return null
+  return first as ProductRow
+}
+
+function sanitizePaging(options?: ProductQueryOptions): { page: number; pageSize: number } {
+  const page = Math.max(1, Math.floor(Number(options?.page ?? 1)))
+  const pageSize = Math.min(100, Math.max(1, Math.floor(Number(options?.pageSize ?? DEFAULT_PRODUCT_PAGE_SIZE))))
+  return { page, pageSize }
+}
+
+async function queryProductList(options?: ProductQueryOptions): Promise<Product[]> {
+  const { page, pageSize } = sanitizePaging(options)
+  const from = (page - 1) * pageSize
+  const to = from + pageSize - 1
+  const rows = await selectProductsWithFallback((selectColumns) => {
+    const query = supabase.from("products").select(selectColumns)
+    return query.range(from, to)
+  })
+  const withImages = await attachProductImages(rows as ProductRow[])
+  return withImages
+    .filter((row) => isProductVisible(row as ProductRow))
     .map((row) => normalizeProduct(row as ProductRow))
     .filter(isValidProduct)
 }
 
-export async function searchProducts(keyword: string): Promise<Product[]> {
-  const rows = await selectProductsWithFallback((selectColumns) =>
-    supabase
-      .from("products")
-      .select(selectColumns)
-      .ilike("name", `%${keyword}%`)
-  )
+export async function getProducts(options?: ProductQueryOptions): Promise<Product[]> {
+  return queryProductList(options)
+}
+
+export async function getProductsPage(options?: ProductQueryOptions): Promise<ProductPageResult> {
+  const { page, pageSize } = sanitizePaging(options)
+  const probeRows = await queryProductList({ ...options, page, pageSize: pageSize + 1 })
+  const hasNextPage = probeRows.length > pageSize
+  const items = hasNextPage ? probeRows.slice(0, pageSize) : probeRows
+  return {
+    items,
+    page,
+    pageSize,
+    hasNextPage,
+  }
+}
+
+export async function searchProducts(keyword: string, options?: SearchProductsOptions): Promise<Product[]> {
+  const { page, pageSize } = sanitizePaging(options)
+  const from = (page - 1) * pageSize
+  const to = from + pageSize - 1
+  const { data } = await supabase
+    .from("products")
+    .select("id,name,slug,price,thumbnail_url,category_id,stock,brand,size,color,status")
+    .eq("status", "active")
+    .ilike("name", `%${keyword}%`)
+    .range(from, to)
+
+  const rows = Array.isArray(data) ? (data as ProductRow[]) : []
   const withImages = await attachProductImages(rows)
-  const withCategories = await attachCategoryNames(withImages as ProductRow[])
-  return withCategories
+  return withImages
+    .filter((row) => isProductVisible(row as ProductRow))
     .map((row) => normalizeProduct(row as ProductRow))
     .filter(isValidProduct)
 }
 
 export async function getProductById(productId: string | number): Promise<Product | null> {
   const id = productId
-  const { data, error } = await supabase
+  const db = getServerWriteClient()
+  const [{ data, error }, detailsRow] = await Promise.all([
+    db
     .from("products")
     .select("*")
     .eq("id", id as string | number)
-    .single()
+      .single(),
+    fetchProductDetailsRow(id, db),
+  ])
 
   if (error || !data) return null
 
   const [withCategoryRows, galleryUrls] = await Promise.all([
-    attachCategoryNames([data as ProductRow]),
+    attachCategoryNames([{
+      ...(data as ProductRow),
+      ...(detailsRow ?? {}),
+    }]),
     fetchProductGalleryUrls(id),
   ])
 
   const withCategory = withCategoryRows[0] as ProductRow
+  if (!isProductVisible(withCategory)) return null
   const normalized = normalizeProduct(withCategory)
   if (!normalized) return null
 
@@ -552,6 +698,21 @@ export async function getProductById(productId: string | number): Promise<Produc
     gallery_images,
   }
   return isValidProduct(product) ? product : null
+}
+
+export async function getProductBySlug(slug: string): Promise<Product | null> {
+  const safeSlug = String(slug ?? "").trim()
+  if (!safeSlug) return null
+  const db = getServerWriteClient()
+
+  const { data, error } = await db
+    .from("products")
+    .select("id")
+    .eq("slug", safeSlug)
+    .single()
+
+  if (error || !data?.id) return null
+  return getProductById(data.id as string | number)
 }
 
 export async function getRelatedProducts(
@@ -571,6 +732,7 @@ export async function getRelatedProducts(
   const withImages = await attachProductImages(seededRows)
   const withCategories = await attachCategoryNames(withImages as ProductRow[])
   return withCategories
+    .filter((row) => isProductVisible(row as ProductRow))
     .map((row) => normalizeProduct(row as ProductRow))
     .filter(isValidProduct)
     .slice(0, safeLimit)

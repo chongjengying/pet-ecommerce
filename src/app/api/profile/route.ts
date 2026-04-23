@@ -10,6 +10,7 @@ import {
   type ResolvedUser,
 } from "@/lib/customerProfile";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
+import { issueEmailVerificationToken } from "@/lib/emailVerification";
 import {
   addressesTable,
   fetchUserAddresses,
@@ -18,6 +19,7 @@ import {
 } from "@/lib/userAddressDb";
 import { userIdForDbQuery } from "@/lib/userIdDb";
 type ProfileRequestBody = {
+  email?: unknown;
   first_name?: unknown;
   last_name?: unknown;
   full_name?: unknown;
@@ -39,6 +41,13 @@ type ProfileRequestBody = {
   set_default?: unknown;
   defaultType?: unknown;
 };
+
+function normalizeEmail(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const email = value.trim().toLowerCase();
+  if (!email) return null;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
+}
 
 function missingColumnName(error: unknown): string | null {
   const message = String((error as { message?: string })?.message ?? "");
@@ -263,12 +272,22 @@ export async function PUT(request: Request) {
   const profileExtras: Record<string, unknown> = {};
   const firstName = has("first_name") ? cleanString(body.first_name) : resolvedUser.first_name;
   const lastName = has("last_name") ? cleanString(body.last_name) : resolvedUser.last_name;
+  const requestedEmail = has("email") ? normalizeEmail(body.email) : null;
+  if (has("email") && requestedEmail == null) {
+    return NextResponse.json({ error: "Please provide a valid email address." }, { status: 400 });
+  }
+  const emailChanged =
+    requestedEmail != null &&
+    requestedEmail !== String(resolvedUser.email ?? "").trim().toLowerCase();
 
   if (has("first_name")) {
     userUpdatePayload.first_name = firstName;
   }
   if (has("last_name")) {
     userUpdatePayload.last_name = lastName;
+  }
+  if (emailChanged && requestedEmail) {
+    userUpdatePayload.email = requestedEmail;
   }
   if (has("avatar_url")) {
     profileExtras.avatar_url = cleanString(body.avatar_url);
@@ -327,6 +346,11 @@ export async function PUT(request: Request) {
     );
   }
   const canonicalUser = canonicalUserResult.rows[0];
+
+  if (emailChanged) {
+    // Reset verification state for the new email so resend sends to latest address.
+    await issueEmailVerificationToken(supabase, canonicalUser.id, { markUnverified: true });
+  }
 
   let profilesTableMissing = false;
   let profileData: Record<string, unknown> | null = null;

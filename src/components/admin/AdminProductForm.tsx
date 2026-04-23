@@ -224,9 +224,10 @@ export default function AdminProductForm({ mode, product, categoryOptions }: Adm
     }
     setSaving(true);
     try {
+      const priceValue = Number(Number(price).toFixed(2));
       const payload = {
         name: name.trim(),
-        price: Number(price),
+        price: priceValue,
         stock: Number(stock),
         category: category.trim() || null,
         description: description.trim() || null,

@@ -55,10 +55,20 @@ export async function middleware(request: NextRequest) {
   const hasCustomerSession = hasValidCustomerSessionToken(customerToken);
 
   const isApiAdmin = pathname.startsWith("/api/admin");
+  const isApiAuthMe = pathname === "/api/auth/me";
   const isPageAdmin = pathname.startsWith("/admin");
   const isCustomerLogin = pathname === "/auth/login";
 
-  if (!isApiAdmin && !isPageAdmin && !isCustomerLogin) {
+  if (!isApiAdmin && !isPageAdmin && !isCustomerLogin && !isApiAuthMe) {
+    return NextResponse.next();
+  }
+
+  if (isApiAuthMe) {
+    const authHeader = request.headers.get("authorization") ?? "";
+    const hasBearer = authHeader.toLowerCase().startsWith("bearer ") && authHeader.trim().length > 7;
+    if (!hasCustomerSession && !hasBearer) {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
     return NextResponse.next();
   }
 
@@ -151,5 +161,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/api/admin/:path*", "/auth/login"],
+  matcher: ["/admin/:path*", "/api/admin/:path*", "/api/auth/me", "/auth/login"],
 };

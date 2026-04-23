@@ -196,8 +196,9 @@ function normalizeCartItems(input: unknown): CartRowItem[] {
       if (!productId) return null;
 
       const quantity = Math.max(1, Math.floor(Number(row.quantity ?? 1)));
-      const unitPrice = Number(row.price_at_time ?? row.price ?? 0);
+      const unitPrice = Number(row.unit_price ?? row.price_at_time ?? row.price ?? 0);
       const lineTotalRaw = Number(row.line_total);
+      const priceAtTimeRaw = Number(row.price_at_time);
       const stockRaw = productRaw?.stock;
       const stock = stockRaw == null ? null : Number(stockRaw);
 
@@ -205,7 +206,8 @@ function normalizeCartItems(input: unknown): CartRowItem[] {
         id: String(row.id ?? productId),
         product_id: String(row.product_id ?? productId),
         quantity,
-        price_at_time: Number.isFinite(unitPrice) ? unitPrice : 0,
+        unit_price: Number.isFinite(unitPrice) ? unitPrice : 0,
+        price_at_time: Number.isFinite(priceAtTimeRaw) ? priceAtTimeRaw : null,
         line_total:
           Number.isFinite(lineTotalRaw)
             ? lineTotalRaw
@@ -331,7 +333,7 @@ export default function CartPage() {
   const subtotal = useMemo(
     () =>
       cartItems.reduce((sum, item) => {
-        const unitPrice = Number(item.price_at_time);
+        const unitPrice = Number(item.unit_price);
         const quantity = Math.max(1, Math.floor(Number(item.quantity ?? 1)));
         return sum + (Number.isFinite(unitPrice) ? unitPrice : 0) * quantity;
       }, 0),
@@ -384,11 +386,25 @@ export default function CartPage() {
   };
 
   const fetchCart = useCallback(async (hasLocalSnapshot = false) => {
+    const debugLabel = `[cart][page] GET /api/cart`;
+    const startedAt = Date.now();
     if (!hasLocalSnapshot) setLoading(true);
     setError(null);
     try {
+      if (process.env.NODE_ENV !== "production") {
+        console.log(`${debugLabel} start`, { hasLocalSnapshot, startedAt });
+      }
       const res = await requestWithCustomerAuth("/api/cart");
       const data = (await res.json().catch(() => ({}))) as ApiErrorPayload & Partial<CartResponse>;
+      if (process.env.NODE_ENV !== "production") {
+        console.log(`${debugLabel} response`, {
+          ok: res.ok,
+          status: res.status,
+          itemCount: Array.isArray(data.items) ? data.items.length : 0,
+          elapsedMs: Date.now() - startedAt,
+          error: data.error ?? null,
+        });
+      }
       if (!res.ok) {
         if (res.status === 401) {
           router.push("/auth/login?next=/cart");
@@ -407,6 +423,9 @@ export default function CartPage() {
         items: normalizeCartItems(data.items),
       });
     } catch {
+      if (process.env.NODE_ENV !== "production") {
+        console.log(`${debugLabel} network/error`, { elapsedMs: Date.now() - startedAt });
+      }
       setError("[GET /api/cart] Could not reach server.");
       if (!hasLocalSnapshot) {
         setCart({ cart_id: "", item_count: 0, subtotal: 0, items: [] });
@@ -454,6 +473,9 @@ export default function CartPage() {
 
   useEffect(() => {
     setMounted(true);
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[cart][page] mounted");
+    }
     setEmail(readEmailFromToken());
     const localCart = getCartFromLocalStorage();
     const hasLocalSnapshot = Boolean(localCart && localCart.items.length > 0);
@@ -466,6 +488,13 @@ export default function CartPage() {
 
   useEffect(() => {
     const onCartChanged = () => {
+      if (process.env.NODE_ENV !== "production") {
+        console.log("[cart][page] cart-changed event -> refetch");
+      }
+      const snapshot = getCartFromLocalStorage();
+      if (snapshot) {
+        setCart(snapshot);
+      }
       void fetchCart(true);
     };
     window.addEventListener("cart-changed", onCartChanged);
@@ -473,6 +502,9 @@ export default function CartPage() {
   }, [fetchCart]);
 
   useEffect(() => {
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[cart][page] prefetch /profile/orders");
+    }
     router.prefetch("/profile/orders");
   }, [router]);
 
@@ -574,8 +606,8 @@ export default function CartPage() {
           id: item.product_id,
           name: item.product.name,
           quantity: item.quantity,
-          unit_price: item.price_at_time,
-          line_total: item.price_at_time * item.quantity,
+          unit_price: item.unit_price,
+          line_total: item.unit_price * item.quantity,
         })),
       };
       setPlacedOrder(data.order ?? fallbackOrder);
@@ -1039,11 +1071,11 @@ export default function CartPage() {
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium text-zinc-900">{item.product.name}</p>
                         <p className="mt-1 text-xs text-zinc-500">
-                          {item.quantity} x RM{Number(item.price_at_time).toFixed(2)}
+                          {item.quantity} x RM{Number(item.unit_price).toFixed(2)}
                         </p>
                       </div>
                       <p className="shrink-0 text-sm font-semibold text-zinc-900">
-                        RM{(item.price_at_time * item.quantity).toFixed(2)}
+                        RM{(item.unit_price * item.quantity).toFixed(2)}
                       </p>
                     </div>
                   ))}

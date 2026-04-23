@@ -5,7 +5,6 @@ import { getSupabaseServerClient } from "@/lib/supabaseServer";
 import { userIdForDbQuery } from "@/lib/userIdDb";
 import {
   addOrIncrementCartItem,
-  getCartItemById,
   getCartItemByProductId,
   getCartView,
   removeCartItemById,
@@ -23,8 +22,15 @@ type CartPatchBody = {
 };
 
 export async function GET(request: Request) {
+  const startedAt = Date.now();
+  if (process.env.NODE_ENV !== "production") {
+    console.log("[api/cart][GET] start");
+  }
   const session = await getCustomerFromRequest(request);
   if (!session) {
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[api/cart][GET] unauthorized", { elapsedMs: Date.now() - startedAt });
+    }
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -32,6 +38,9 @@ export async function GET(request: Request) {
   try {
     supabase = getSupabaseServerClient();
   } catch (err) {
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[api/cart][GET] supabase unavailable", { elapsedMs: Date.now() - startedAt });
+    }
     return NextResponse.json({ error: err instanceof Error ? err.message : "Cart API is not configured." }, { status: 503 });
   }
 
@@ -41,13 +50,29 @@ export async function GET(request: Request) {
     email: session.email,
   });
   if (!resolved) {
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[api/cart][GET] profile not found", { elapsedMs: Date.now() - startedAt });
+    }
     return NextResponse.json({ error: "Profile not found." }, { status: 404 });
   }
 
   const userIdKey = userIdForDbQuery(resolved.id);
   const result = await getCartView(supabase, userIdKey);
   if (result.error || !result.data) {
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[api/cart][GET] failed", {
+        elapsedMs: Date.now() - startedAt,
+        error: result.error?.message ?? "Could not load cart.",
+      });
+    }
     return NextResponse.json({ error: result.error?.message || "Could not load cart." }, { status: 400 });
+  }
+  if (process.env.NODE_ENV !== "production") {
+    console.log("[api/cart][GET] success", {
+      elapsedMs: Date.now() - startedAt,
+      itemCount: result.data.item_count,
+      subtotal: result.data.subtotal,
+    });
   }
   return NextResponse.json(result.data);
 }
@@ -86,21 +111,12 @@ export async function PATCH(request: Request) {
   const productId = String(body.productId ?? body.product_id ?? "").trim();
   if (!itemId && !productId) return NextResponse.json({ error: "itemId or productId is required." }, { status: 400 });
 
-  const action = String(body.action ?? "set").trim().toLowerCase();
-  const qty = Math.max(1, Math.floor(Number(body.quantity ?? 1)));
+  const nextQty = Math.max(0, Math.floor(Number(body.quantity ?? 1)));
+  if (!Number.isFinite(nextQty)) {
+    return NextResponse.json({ error: "quantity must be a valid number." }, { status: 400 });
+  }
 
-  let nextQty = qty;
-  if (action === "increment" || action === "decrement") {
-    const lookup = itemId
-      ? await getCartItemById(supabase, userIdKey, itemId)
-      : await getCartItemByProductId(supabase, userIdKey, productId);
-    if (lookup.error) {
-      return NextResponse.json({ error: lookup.error.message || "Could not load cart item." }, { status: 400 });
-    }
-    if (!lookup.itemId) return NextResponse.json({ error: "Cart item not found." }, { status: 404 });
-    itemId = lookup.itemId;
-    nextQty = action === "increment" ? lookup.quantity + 1 : Math.max(1, lookup.quantity - 1);
-  } else if (!itemId) {
+  if (!itemId) {
     const lookup = await getCartItemByProductId(supabase, userIdKey, productId);
     if (lookup.error) {
       return NextResponse.json({ error: lookup.error.message || "Could not load cart item." }, { status: 400 });
@@ -109,9 +125,16 @@ export async function PATCH(request: Request) {
     itemId = lookup.itemId;
   }
 
-  const updateError = await setCartItemQuantityById(supabase, userIdKey, itemId, nextQty);
-  if (updateError) {
-    return NextResponse.json({ error: updateError.message || "Could not update cart item." }, { status: 400 });
+  if (nextQty <= 0) {
+    const removeError = await removeCartItemById(supabase, userIdKey, itemId);
+    if (removeError) {
+      return NextResponse.json({ error: removeError.message || "Could not remove cart item." }, { status: 400 });
+    }
+  } else {
+    const updateError = await setCartItemQuantityById(supabase, userIdKey, itemId, nextQty);
+    if (updateError) {
+      return NextResponse.json({ error: updateError.message || "Could not update cart item." }, { status: 400 });
+    }
   }
 
   const refreshed = await getCartView(supabase, userIdKey);
@@ -192,16 +215,32 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Profile not found." }, { status: 404 });
   }
   const userIdKey = userIdForDbQuery(resolved.id);
+  const url = new URL(request.url);
+  const includeFullView = url.searchParams.get("include") === "full";
 
-  let body: CartPatchBody;
+  let body: CartPatchBody = {};
   try {
     body = (await request.json()) as CartPatchBody;
   } catch {
+    if (includeFullView) {
+      const refreshed = await getCartView(supabase, userIdKey);
+      if (refreshed.error || !refreshed.data) {
+        return NextResponse.json({ error: refreshed.error?.message || "Could not reload cart." }, { status: 400 });
+      }
+      return NextResponse.json(refreshed.data);
+    }
     return NextResponse.json({ error: "Invalid JSON." }, { status: 400 });
   }
 
   const productId = String(body.productId ?? body.product_id ?? "").trim();
   if (!productId) {
+    if (includeFullView) {
+      const refreshed = await getCartView(supabase, userIdKey);
+      if (refreshed.error || !refreshed.data) {
+        return NextResponse.json({ error: refreshed.error?.message || "Could not reload cart." }, { status: 400 });
+      }
+      return NextResponse.json(refreshed.data);
+    }
     console.error("[api/cart POST] Missing product id in body", body);
     return NextResponse.json({ error: "productId (or product_id) is required.", code: "MISSING_PRODUCT_ID" }, { status: 400 });
   }
@@ -229,8 +268,6 @@ export async function POST(request: Request) {
     );
   }
 
-  const url = new URL(request.url);
-  const includeFullView = url.searchParams.get("include") === "full";
   if (!includeFullView) {
     return NextResponse.json({
       ok: true,

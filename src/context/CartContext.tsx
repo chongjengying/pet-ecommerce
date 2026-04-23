@@ -23,7 +23,8 @@ type ServerCartItem = {
   id: string;
   product_id: string;
   quantity: number;
-  price_at_time: number;
+  unit_price?: number | null;
+  price_at_time?: number | null;
   product: {
     id: string;
     name: string;
@@ -39,8 +40,19 @@ type ServerCartResponse = {
   subtotal?: number;
   items?: ServerCartItem[];
 };
+type CartItemPatchResponse = {
+  item?: {
+    id?: string | number;
+    quantity?: number;
+  };
+  totals?: { subtotal?: number; grand_total?: number };
+  error?: string;
+};
 
 const CART_SNAPSHOT_KEY = "customer_cart_snapshot";
+const QTY_ACTION_MIN_LOCK_MS = 300;
+const QTY_LOADING_DELAY_MS = 200;
+const QTY_SUCCESS_BADGE_MS = 900;
 
 function readToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -98,7 +110,7 @@ function mapServerItemsToCartItems(serverItems: ServerCartItem[]): CartItem[] {
     mapped.push({
       id,
       name: String(product.name ?? "Product"),
-      price: Number(row?.price_at_time ?? 0),
+      price: Number(row?.unit_price ?? row?.price_at_time ?? 0),
       image: product.image ?? undefined,
       image_url: product.image_url ?? undefined,
       stock: product.stock ?? undefined,
@@ -133,13 +145,32 @@ function getStockLimit(item: Pick<Product, "stock"> | Pick<CartItem, "stock">): 
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);
   const [flyoutOpen, setFlyoutOpen] = useState(false);
+  const [qtyActionPendingById, setQtyActionPendingById] = useState<Record<string, boolean>>({});
+  const [qtyLoadingVisibleById, setQtyLoadingVisibleById] = useState<Record<string, boolean>>({});
+  const [qtySuccessVisibleById, setQtySuccessVisibleById] = useState<Record<string, boolean>>({});
+  const qtyLoadingTimerRef = useRef<Record<string, number>>({});
+  const qtySuccessTimerRef = useRef<Record<string, number>>({});
   const flyoutContainerRef = useRef<HTMLDivElement | null>(null);
   const lastFocusedElementRef = useRef<HTMLElement | null>(null);
 
   const refreshFromServer = useCallback(async () => {
+    const debugLabel = `[cart][context] GET /api/cart`;
+    const startedAt = Date.now();
     try {
+      if (process.env.NODE_ENV !== "production") {
+        console.log(`${debugLabel} start`, { startedAt });
+      }
       const res = await requestCartApi("/api/cart");
       const data = (await res.json().catch(() => ({}))) as ServerCartResponse & { error?: string };
+      if (process.env.NODE_ENV !== "production") {
+        console.log(`${debugLabel} response`, {
+          ok: res.ok,
+          status: res.status,
+          itemCount: Array.isArray(data.items) ? data.items.length : 0,
+          elapsedMs: Date.now() - startedAt,
+          error: data.error ?? null,
+        });
+      }
       if (!res.ok) {
         if (res.status === 401) {
           setItems([]);
@@ -152,6 +183,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       });
       persistCartSnapshot(nextItems);
     } catch {
+      if (process.env.NODE_ENV !== "production") {
+        console.log(`${debugLabel} network/error`, { elapsedMs: Date.now() - startedAt });
+      }
       // Keep current in-memory cart if sync fails transiently.
     }
   }, []);
@@ -179,12 +213,36 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     };
   }, [refreshFromServer]);
 
+  useEffect(() => {
+    return () => {
+      const timers = qtyLoadingTimerRef.current;
+      for (const key of Object.keys(timers)) {
+        window.clearTimeout(timers[key]);
+      }
+      qtyLoadingTimerRef.current = {};
+      const successTimers = qtySuccessTimerRef.current;
+      for (const key of Object.keys(successTimers)) {
+        window.clearTimeout(successTimers[key]);
+      }
+      qtySuccessTimerRef.current = {};
+    };
+  }, []);
+
   const addToCart = useCallback(async (product: Product, quantity = 1): Promise<boolean> => {
+    const beforeItems = items;
     const requestedQty = Math.max(1, Math.floor(Number(quantity)));
     if (!Number.isFinite(requestedQty) || requestedQty <= 0) return false;
     const token = readToken();
     const id = String(product.id);
     const normalized = { ...product, id };
+    const existing = items.find((i) => String(i.id) === id);
+    const stockLimit = getStockLimit(product) ?? getStockLimit(existing ?? normalized);
+    const existingQty = existing?.quantity ?? 0;
+    if (stockLimit !== undefined) {
+      const remaining = Math.max(0, stockLimit - existingQty);
+      if (remaining <= 0) return false;
+      if (requestedQty > remaining) return false;
+    }
 
     let didAdd = false;
     setItems((prev) => {
@@ -209,16 +267,12 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     if (!didAdd) return false;
 
     const optimisticItems = (() => {
-      const existing = items.find((i) => String(i.id) === id);
-      const stockLimit = getStockLimit(product) ?? getStockLimit(existing ?? normalized);
       if (stockLimit !== undefined && stockLimit <= 0) return items;
       if (existing) {
-        const nextQtyRaw = existing.quantity + requestedQty;
-        const nextQty = stockLimit !== undefined ? Math.min(nextQtyRaw, stockLimit) : nextQtyRaw;
+        const nextQty = existing.quantity + requestedQty;
         return items.map((i) => (String(i.id) === id ? { ...i, quantity: nextQty } : i));
       }
-      const initialQty = stockLimit !== undefined ? Math.min(requestedQty, stockLimit) : requestedQty;
-      return [...items, { ...normalized, quantity: initialQty }];
+      return [...items, { ...normalized, quantity: requestedQty }];
     })();
     persistCartSnapshot(optimisticItems);
 
@@ -227,20 +281,22 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     if (token) {
       void (async () => {
         try {
-          const res = await requestCartApi("/api/cart?include=full", {
+          const res = await requestCartApi("/api/cart/items", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              product_id: id,
               productId: id,
               quantity: requestedQty,
             }),
           });
           const data = (await res.json().catch(() => ({}))) as ServerCartResponse & { error?: string };
           if (!res.ok) {
-            void refreshFromServer();
+            startTransition(() => {
+              setItems(beforeItems);
+            });
+            persistCartSnapshot(beforeItems);
             return;
           }
           if (Array.isArray(data.items)) {
@@ -249,19 +305,20 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
               setItems(nextItems);
             });
             persistCartSnapshot(nextItems);
-            window.dispatchEvent(new Event("cart-changed"));
             return;
           }
-          void refreshFromServer();
         } catch {
-          void refreshFromServer();
+          startTransition(() => {
+            setItems(beforeItems);
+          });
+          persistCartSnapshot(beforeItems);
         }
       })();
       return true;
     }
 
     return true;
-  }, [items, refreshFromServer]);
+  }, [items]);
 
   const openCartFlyout = useCallback(() => setFlyoutOpen(true), []);
   const closeCartFlyout = useCallback(() => setFlyoutOpen(false), []);
@@ -287,6 +344,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const removeFromCart = useCallback((productId: string) => {
     const id = String(productId);
+    const beforeItems = items;
     let optimisticItems: CartItem[] = [];
     setItems((prev) => {
       optimisticItems = prev.filter((i) => String(i.id) !== id);
@@ -296,29 +354,47 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
     void (async () => {
       try {
-        const res = await requestCartApi(`/api/cart?productId=${encodeURIComponent(id)}`, {
+        const res = await requestCartApi(`/api/cart/items/${encodeURIComponent(id)}`, {
           method: "DELETE",
         });
-        const data = (await res.json().catch(() => ({}))) as ServerCartResponse & { error?: string };
-        if (res.ok && Array.isArray(data.items)) {
-          const nextItems = mapServerItemsToCartItems(data.items);
-          startTransition(() => {
-            setItems(nextItems);
-          });
-          persistCartSnapshot(nextItems);
-          window.dispatchEvent(new Event("cart-changed"));
+        if (res.ok) {
+          setQtySuccessVisibleById((prev) => ({ ...prev, [id]: true }));
+          if (qtySuccessTimerRef.current[id]) {
+            window.clearTimeout(qtySuccessTimerRef.current[id]);
+          }
+          qtySuccessTimerRef.current[id] = window.setTimeout(() => {
+            setQtySuccessVisibleById((prev) => {
+              if (!(id in prev)) return prev;
+              const next = { ...prev };
+              delete next[id];
+              return next;
+            });
+            delete qtySuccessTimerRef.current[id];
+          }, QTY_SUCCESS_BADGE_MS);
           return;
         }
       } catch {
         // Keep optimistic local state; next refresh can reconcile.
       }
-      void refreshFromServer();
+      startTransition(() => {
+        setItems(beforeItems);
+      });
+      persistCartSnapshot(beforeItems);
     })();
-  }, [refreshFromServer]);
+  }, [items]);
 
   const updateQuantity = useCallback((productId: string, quantity: number) => {
+    const beforeItems = items;
     const id = String(productId);
-    const requestedQty = Math.max(1, Math.floor(Number(quantity)));
+    const requestedQty = Math.max(0, Math.floor(Number(quantity)));
+    const targetItem = items.find((i) => String(i.id) === id);
+    const stockLimit = targetItem ? getStockLimit(targetItem) : undefined;
+    const cappedQty =
+      requestedQty <= 0
+        ? 0
+        : (stockLimit !== undefined ? Math.min(requestedQty, stockLimit) : requestedQty);
+    const isIncreaseAction = cappedQty > (targetItem?.quantity ?? 0);
+    const reqLabel = `[cart][qty] id=${id} from=${targetItem?.quantity ?? "n/a"} to=${cappedQty}`;
 
     let optimisticItems: CartItem[] = [];
     setItems((prev) => {
@@ -333,13 +409,13 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         return prev;
       }
 
-      const stockLimit = getStockLimit(target);
-      if (stockLimit !== undefined && stockLimit <= 0) {
+      const targetStockLimit = getStockLimit(target);
+      if (targetStockLimit !== undefined && targetStockLimit <= 0) {
         optimisticItems = prev.filter((i) => String(i.id) !== id);
         return optimisticItems;
       }
 
-      const nextQty = stockLimit !== undefined ? Math.min(requestedQty, stockLimit) : requestedQty;
+      const nextQty = targetStockLimit !== undefined ? Math.min(requestedQty, targetStockLimit) : requestedQty;
       if (nextQty === target.quantity) {
         optimisticItems = prev;
         return prev;
@@ -349,54 +425,108 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       return optimisticItems;
     });
     persistCartSnapshot(optimisticItems);
+    const startedAt = Date.now();
+    setQtyActionPendingById((prev) => ({ ...prev, [id]: true }));
+    if (!isIncreaseAction) {
+      qtyLoadingTimerRef.current[id] = window.setTimeout(() => {
+        setQtyLoadingVisibleById((prev) => ({ ...prev, [id]: true }));
+      }, QTY_LOADING_DELAY_MS);
+    }
 
     void (async () => {
       try {
-        if (quantity <= 0) {
-          const res = await requestCartApi(`/api/cart?productId=${encodeURIComponent(id)}`, {
-            method: "DELETE",
+        if (process.env.NODE_ENV !== "production") {
+          console.time(reqLabel);
+          console.log(`${reqLabel} start`, { requestedQty, cappedQty, isIncreaseAction });
+        }
+        const res =
+          cappedQty <= 0
+            ? await requestCartApi(`/api/cart/items/${encodeURIComponent(id)}`, {
+                method: "DELETE",
+              })
+            : await requestCartApi(`/api/cart/items/${encodeURIComponent(id)}`, {
+                method: "PATCH",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  quantity: cappedQty,
+                }),
+              });
+        const data = (await res.json().catch(() => ({}))) as
+          | (ServerCartResponse & { error?: string })
+          | CartItemPatchResponse;
+        if (process.env.NODE_ENV !== "production") {
+          console.log(`${reqLabel} response`, {
+            ok: res.ok,
+            status: res.status,
+            itemCount: "items" in data && Array.isArray(data.items) ? data.items.length : null,
+            hasItem: "item" in data ? Boolean(data.item) : null,
+            totals: "totals" in data ? data.totals ?? null : null,
+            error: ("error" in data ? data.error : null) ?? null,
           });
-          const data = (await res.json().catch(() => ({}))) as ServerCartResponse & { error?: string };
-          if (res.ok && Array.isArray(data.items)) {
-            const nextItems = mapServerItemsToCartItems(data.items);
-            startTransition(() => {
-              setItems(nextItems);
+        }
+        if (res.ok) {
+          const patchedQty =
+            cappedQty > 0 && "item" in data && data.item
+              ? Math.max(1, Math.floor(Number(data.item.quantity ?? cappedQty)))
+              : cappedQty;
+          if (cappedQty > 0) {
+            setItems((prev) => {
+              const next = prev.map((row) => {
+                if (String(row.id) !== id) return row;
+                return {
+                  ...row,
+                  quantity: patchedQty,
+                };
+              });
+              persistCartSnapshot(next);
+              return next;
             });
-            persistCartSnapshot(nextItems);
-            window.dispatchEvent(new Event("cart-changed"));
-            return;
           }
-          void refreshFromServer();
           return;
         }
-
-        const res = await requestCartApi("/api/cart", {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            productId: id,
-            action: "set",
-            quantity: requestedQty,
-          }),
+        startTransition(() => {
+          setItems(beforeItems);
         });
-        const data = (await res.json().catch(() => ({}))) as ServerCartResponse & { error?: string };
-        if (res.ok && Array.isArray(data.items)) {
-          const nextItems = mapServerItemsToCartItems(data.items);
-          startTransition(() => {
-            setItems(nextItems);
-          });
-          persistCartSnapshot(nextItems);
-          window.dispatchEvent(new Event("cart-changed"));
-          return;
-        }
+        persistCartSnapshot(beforeItems);
       } catch {
-        // Keep optimistic local state; next refresh can reconcile.
+        if (process.env.NODE_ENV !== "production") {
+          console.log(`${reqLabel} network/error`);
+        }
+        startTransition(() => {
+          setItems(beforeItems);
+        });
+        persistCartSnapshot(beforeItems);
+      } finally {
+        if (process.env.NODE_ENV !== "production") {
+          console.timeEnd(reqLabel);
+        }
       }
-      void refreshFromServer();
-    })();
-  }, [refreshFromServer]);
+    })().finally(() => {
+      const loadingTimer = qtyLoadingTimerRef.current[id];
+      if (loadingTimer) {
+        window.clearTimeout(loadingTimer);
+        delete qtyLoadingTimerRef.current[id];
+      }
+      setQtyLoadingVisibleById((prev) => {
+        if (!(id in prev)) return prev;
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      const elapsed = Date.now() - startedAt;
+      const remaining = Math.max(0, QTY_ACTION_MIN_LOCK_MS - elapsed);
+      window.setTimeout(() => {
+        setQtyActionPendingById((prev) => {
+          if (!(id in prev)) return prev;
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+      }, remaining);
+    });
+  }, [items]);
 
   const cartCount = items.reduce((sum, i) => sum + i.quantity, 0);
   const clearCart = useCallback(() => {
@@ -481,11 +611,23 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
                       <div className="min-w-0 flex-1">
                         <h3 className="font-semibold text-umber line-clamp-2">{item.name}</h3>
                         <p className="mt-0.5 text-sm text-umber/70">RM{item.price.toFixed(2)} each</p>
+                        {qtyLoadingVisibleById[String(item.id)] ? (
+                          <p className="mt-1 text-xs font-medium text-terracotta">Updating quantity...</p>
+                        ) : qtySuccessVisibleById[String(item.id)] ? (
+                          <p className="mt-1 text-xs font-medium text-sage">Updated</p>
+                        ) : null}
                         <div className="mt-2 flex items-center gap-1">
+                          {qtyLoadingVisibleById[String(item.id)] ? (
+                            <span
+                              className="mr-1 inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-amber-300 border-t-terracotta"
+                              aria-label="Updating quantity"
+                            />
+                          ) : null}
                           <button
                             type="button"
                             onClick={() => updateQuantity(String(item.id), item.quantity - 1)}
-                            className="flex h-7 w-7 items-center justify-center rounded border border-amber-200 text-umber hover:bg-amber-50"
+                            disabled={Boolean(qtyActionPendingById[String(item.id)])}
+                            className="flex h-7 w-7 items-center justify-center rounded border border-amber-200 text-umber hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
                             aria-label={item.quantity === 1 ? "Remove item" : "Decrease"}
                           >
                             −
@@ -494,7 +636,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
                           <button
                             type="button"
                             onClick={() => updateQuantity(String(item.id), item.quantity + 1)}
-                            disabled={typeof item.stock === "number" && item.quantity >= item.stock}
+                            disabled={
+                              Boolean(qtyActionPendingById[String(item.id)]) ||
+                              (getStockLimit(item) !== undefined && item.quantity >= (getStockLimit(item) ?? 0))
+                            }
                             className="flex h-7 w-7 items-center justify-center rounded border border-amber-200 text-umber hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
                             aria-label="Increase"
                           >
@@ -503,7 +648,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
                           <button
                             type="button"
                             onClick={() => removeFromCart(String(item.id))}
-                            className="ml-2 text-xs text-red-600 hover:underline"
+                            disabled={Boolean(qtyActionPendingById[String(item.id)])}
+                            className="ml-2 text-xs text-red-600 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             Remove
                           </button>
@@ -555,3 +701,4 @@ export function useCart() {
   if (ctx === undefined) throw new Error("useCart must be used within CartProvider");
   return ctx;
 }
+

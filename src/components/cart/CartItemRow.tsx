@@ -7,7 +7,8 @@ export type CartRowItem = {
   id: string;
   product_id: string;
   quantity: number;
-  price_at_time: number;
+  unit_price: number;
+  price_at_time: number | null;
   line_total: number;
   product: {
     id: string;
@@ -32,7 +33,7 @@ function toProductForImage(item: CartRowItem) {
     name: item.product.name,
     image: item.product.image ?? undefined,
     image_url: item.product.image_url ?? undefined,
-    price: item.price_at_time,
+    price: item.unit_price,
   };
 }
 
@@ -49,7 +50,7 @@ export default function CartItemRow({ item, busy = false, onDecrease, onIncrease
 
       <div className="min-w-0 flex-1">
         <h3 className="line-clamp-2 text-base font-semibold text-zinc-900">{item.product.name}</h3>
-        <p className="mt-1 text-sm text-zinc-600">RM{item.price_at_time.toFixed(2)} each</p>
+        <p className="mt-1 text-sm text-zinc-600">RM{item.unit_price.toFixed(2)} each</p>
 
         <div className="mt-3 flex items-center gap-2">
           <button

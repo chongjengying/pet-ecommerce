@@ -1,5 +1,6 @@
 export interface Product {
   id: string;
+  slug?: string | null;
   name: string;
   price: number;
   image?: string;
@@ -7,6 +8,8 @@ export interface Product {
   description?: string | null;
   category?: string;
   stock?: number;
+  active?: boolean | null;
+  status?: string | null;
   /** Optional PDP fields (when present in DB) */
   brand?: string | null;
   /** Original / list price for strikethrough + discount badge */

@@ -17,6 +17,7 @@ type CartItemRow = {
   user_id?: string | number;
   product_id?: string | number;
   quantity?: number;
+  unit_price?: number | string | null;
   price_at_time?: number | string | null;
   [key: string]: unknown;
 };
@@ -32,12 +33,22 @@ type ProductRow = {
   [key: string]: unknown;
 };
 
+type ProductSnapshot = {
+  id: string;
+  stock: number | null;
+  unitPrice: number;
+  statusRaw: unknown;
+  name: string | null;
+  sku: string | null;
+};
+
 export type CartItemView = {
   id: string;
   cart_id: string;
   product_id: string;
   quantity: number;
-  price_at_time: number;
+  unit_price: number;
+  price_at_time: number | null;
   line_total: number;
   product: {
     id: string;
@@ -71,6 +82,81 @@ function normalizeDbKey(value: unknown): string | number {
 function normalizeNumber(value: unknown, fallback = 0): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function toOptionalBoolean(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return undefined;
+    if (["true", "1", "yes", "active", "enabled", "published"].includes(normalized)) return true;
+    if (["false", "0", "no", "inactive", "disabled", "draft", "archived"].includes(normalized)) return false;
+  }
+  return undefined;
+}
+
+function isProductVisible(row: ProductRow | undefined): boolean {
+  if (!row) return false;
+  const status = toOptionalBoolean(row.status);
+  if (status !== undefined) return status;
+  return true;
+}
+
+async function getProductSnapshotById(
+  supabase: Supabase,
+  productId: string | number
+): Promise<{ product: ProductSnapshot | null; error: DbError }> {
+  const productPk = await getProductPkColumn(supabase);
+  const productIdKey = normalizeDbKey(productId);
+  const selectAttempts = [
+    `${productPk},price,stock,status,name,sku`,
+    `${productPk},price,stock,status,name,product_sku`,
+    `${productPk},price,stock,status,name`,
+    `${productPk},price,stock,status`,
+  ] as const;
+
+  for (const select of selectAttempts) {
+    const { data, error } = await supabase
+      .from("products")
+      .select(select)
+      .eq(productPk, productIdKey)
+      .maybeSingle();
+    if (error) {
+      if (
+        isMissingColumn(error, "sku") ||
+        isMissingColumn(error, "product_sku") ||
+        isMissingColumn(error, "name")
+      ) {
+        continue;
+      }
+      return { product: null, error };
+    }
+
+    const row = (data as unknown as ProductRow) ?? null;
+    if (!row) return { product: null, error: null };
+    const price = Number(row.price);
+    if (!Number.isFinite(price) || price < 0) {
+      return { product: null, error: { message: "Product price is invalid." } };
+    }
+    const stock = row.stock == null ? null : normalizeNumber(row.stock, 0);
+    const statusRaw = (row as Record<string, unknown>).status;
+    const skuRaw = (row as Record<string, unknown>).sku ?? (row as Record<string, unknown>).product_sku;
+
+    return {
+      product: {
+        id: normalizeId(row[productPk]),
+        stock,
+        unitPrice: price,
+        statusRaw,
+        name: typeof row.name === "string" && row.name.trim() ? row.name.trim() : null,
+        sku: typeof skuRaw === "string" && skuRaw.trim() ? skuRaw.trim() : null,
+      },
+      error: null,
+    };
+  }
+
+  return { product: null, error: { message: "Product snapshot could not be resolved." } };
 }
 
 function isMissingColumn(error: unknown, column: string): boolean {
@@ -296,12 +382,19 @@ async function insertCartItem(
     user_id: string | number;
     product_id: string | number;
     quantity: number;
-    price_at_time: number;
+    unit_price: number;
+    price_at_time?: number | null;
     product_name?: string | null;
     sku?: string | null;
   }
 ): Promise<DbError> {
   const insertPayload: Record<string, unknown> = { ...payload };
+  if (!(await hasColumn(supabase, "cart_items", "unit_price"))) {
+    delete insertPayload.unit_price;
+  }
+  if (!(await hasColumn(supabase, "cart_items", "price_at_time"))) {
+    delete insertPayload.price_at_time;
+  }
   if (!(await hasColumn(supabase, "cart_items", "product_name"))) {
     delete insertPayload.product_name;
   }
@@ -317,6 +410,7 @@ async function insertCartItem(
     cart_id: insertPayload.cart_id,
     product_id: insertPayload.product_id,
     quantity: insertPayload.quantity,
+    unit_price: insertPayload.unit_price,
     price_at_time: insertPayload.price_at_time,
     product_name: insertPayload.product_name,
     sku: insertPayload.sku,
@@ -367,6 +461,26 @@ async function createCart(supabase: Supabase, userIdKey: string | number): Promi
   return { cart: noStatus.data as unknown as CartRow, error: null };
 }
 
+async function linkOrphanCartItemsToCart(
+  supabase: Supabase,
+  userIdKey: string | number,
+  cartId: string
+): Promise<DbError> {
+  const cartIdKey = normalizeDbKey(cartId);
+  const hasUserId = await hasColumn(supabase, "cart_items", "user_id");
+  if (!hasUserId) return null;
+
+  const { error } = await supabase
+    .from("cart_items")
+    .update({ cart_id: cartIdKey })
+    .eq("user_id", userIdKey)
+    .is("cart_id", null);
+
+  if (!error) return null;
+  if (isMissingColumn(error, "cart_id") || isMissingColumn(error, "user_id")) return null;
+  return error;
+}
+
 export async function getOrCreateCartId(supabase: Supabase, userIdKey: string | number): Promise<{ cartId: string | null; error: DbError }> {
   const cartPk = await getCartPkColumn(supabase);
   const abandonError = await markStaleActiveCartsAbandoned(supabase, userIdKey);
@@ -375,17 +489,31 @@ export async function getOrCreateCartId(supabase: Supabase, userIdKey: string | 
   const existing = await selectActiveCart(supabase, userIdKey);
   if (existing.error) return { cartId: null, error: existing.error };
   const existingCartId = existing.cart ? existing.cart[cartPk] : null;
-  if (existingCartId != null) return { cartId: normalizeId(existingCartId), error: null };
+  if (existingCartId != null) {
+    const cartId = normalizeId(existingCartId);
+    const linkError = await linkOrphanCartItemsToCart(supabase, userIdKey, cartId);
+    if (linkError) return { cartId: null, error: linkError };
+    return { cartId, error: null };
+  }
 
   const revived = await reviveLatestAbandonedCart(supabase, userIdKey);
   if (revived.error) return { cartId: null, error: revived.error };
   const revivedCartId = revived.cart ? revived.cart[cartPk] : null;
-  if (revivedCartId != null) return { cartId: normalizeId(revivedCartId), error: null };
+  if (revivedCartId != null) {
+    const cartId = normalizeId(revivedCartId);
+    const linkError = await linkOrphanCartItemsToCart(supabase, userIdKey, cartId);
+    if (linkError) return { cartId: null, error: linkError };
+    return { cartId, error: null };
+  }
 
   const created = await createCart(supabase, userIdKey);
   if (created.error) return { cartId: null, error: created.error };
   const createdCartId = created.cart ? created.cart[cartPk] : null;
-  return { cartId: createdCartId != null ? normalizeId(createdCartId) : null, error: null };
+  const cartId = createdCartId != null ? normalizeId(createdCartId) : null;
+  if (!cartId) return { cartId: null, error: null };
+  const linkError = await linkOrphanCartItemsToCart(supabase, userIdKey, cartId);
+  if (linkError) return { cartId: null, error: linkError };
+  return { cartId, error: null };
 }
 
 export async function getCartView(supabase: Supabase, userIdKey: string | number): Promise<{ data: CartView | null; error: DbError }> {
@@ -397,11 +525,32 @@ export async function getCartView(supabase: Supabase, userIdKey: string | number
   }
 
   const cartId = cartResult.cartId;
-  const { data: itemData, error: itemError } = await supabase
-    .from("cart_items")
-    .select(`${itemPk},cart_id,product_id,quantity,price_at_time`)
-    .eq("cart_id", cartId)
-    .order(itemPk, { ascending: true });
+  const itemSelectAttempts = [
+    `${itemPk},cart_id,product_id,quantity,unit_price,price_at_time`,
+    `${itemPk},cart_id,product_id,quantity,unit_price`,
+    `${itemPk},cart_id,product_id,quantity,price_at_time`,
+  ] as const;
+  let itemData: unknown = [];
+  let itemError: DbError = null;
+  for (const select of itemSelectAttempts) {
+    const response = await supabase
+      .from("cart_items")
+      .select(select)
+      .eq("cart_id", cartId)
+      .order(itemPk, { ascending: true });
+    if (!response.error) {
+      itemData = response.data;
+      itemError = null;
+      break;
+    }
+    const missingUnitPrice = isMissingColumn(response.error, "unit_price");
+    const missingPriceAtTime = isMissingColumn(response.error, "price_at_time");
+    if (!missingUnitPrice && !missingPriceAtTime) {
+      itemError = response.error;
+      break;
+    }
+    itemError = response.error;
+  }
   if (itemError) return { data: null, error: itemError };
 
   const items = (Array.isArray(itemData) ? itemData : []) as unknown as CartItemRow[];
@@ -411,10 +560,29 @@ export async function getCartView(supabase: Supabase, userIdKey: string | number
   let productImageMap = new Map<string, string>();
   if (productIds.length > 0) {
     const productIdKeys = Array.from(new Set(productIds.map((id) => normalizeDbKey(id))));
-    const { data: productsData, error: productsError } = await supabase
-      .from("products")
-      .select(`${productPk},name,price,stock`)
-      .in(productPk, productIdKeys);
+    const productSelectAttempts = [
+      `${productPk},name,price,stock,status`,
+      `${productPk},name,price,stock`,
+    ] as const;
+    let productsData: unknown = [];
+    let productsError: DbError = null;
+    for (const select of productSelectAttempts) {
+      const response = await supabase
+        .from("products")
+        .select(select)
+        .in(productPk, productIdKeys);
+      if (!response.error) {
+        productsData = response.data;
+        productsError = null;
+        break;
+      }
+      const missingStatus = isMissingColumn(response.error, "status");
+      if (!missingStatus) {
+        productsError = response.error;
+        break;
+      }
+      productsError = response.error;
+    }
     if (productsError) return { data: null, error: productsError };
     const productsRows = (Array.isArray(productsData) ? productsData : []) as unknown as ProductRow[];
     productMap = new Map(
@@ -426,18 +594,49 @@ export async function getCartView(supabase: Supabase, userIdKey: string | number
     productImageMap = map;
   }
 
-  const mappedItems: CartItemView[] = items.map((row) => {
+  // Auto-cleanup: remove cart items pointing to inactive/missing products.
+  const hiddenItemIds = items
+    .filter((row) => {
+      const productId = normalizeId(row.product_id);
+      const product = productMap.get(productId);
+      return !isProductVisible(product);
+    })
+    .map((row) => normalizeDbKey(row[itemPk]))
+    .filter((id) => normalizeId(id).length > 0);
+
+  if (hiddenItemIds.length > 0) {
+    const { error: cleanupError } = await supabase
+      .from("cart_items")
+      .delete()
+      .in(itemPk, hiddenItemIds)
+      .eq("cart_id", cartId);
+    if (cleanupError) return { data: null, error: cleanupError };
+  }
+
+  const mappedItems: CartItemView[] = items
+    .filter((row) => {
+      const productId = normalizeId(row.product_id);
+      const product = productMap.get(productId);
+      return isProductVisible(product);
+    })
+    .map((row) => {
     const productId = normalizeId(row.product_id);
     const product = productMap.get(productId);
     const quantity = Math.max(1, Math.floor(normalizeNumber(row.quantity, 1)));
-    const unitPrice = normalizeNumber(row.price_at_time, normalizeNumber(product?.price, 0));
+    const unitPrice = normalizeNumber(
+      row.unit_price,
+      normalizeNumber(row.price_at_time, normalizeNumber(product?.price, 0))
+    );
+    const priceAtTimeRaw = Number(row.price_at_time);
+    const priceAtTime = Number.isFinite(priceAtTimeRaw) ? priceAtTimeRaw : null;
     const imageUrl = productImageMap.get(productId) ?? null;
     return {
       id: normalizeId(row[itemPk]),
       cart_id: normalizeId(row.cart_id),
       product_id: productId,
       quantity,
-      price_at_time: unitPrice,
+      unit_price: unitPrice,
+      price_at_time: priceAtTime,
       line_total: unitPrice * quantity,
       product: {
         id: productId,
@@ -469,16 +668,46 @@ export async function setCartItemQuantityById(
 
   const { data: existingRow, error: existingError } = await supabase
     .from("cart_items")
-    .select(`${itemPk},cart_id`)
+    .select(`${itemPk},cart_id,product_id,unit_price,price_at_time`)
     .eq(itemPk, itemIdKey)
     .eq("cart_id", cartResult.cartId)
     .maybeSingle();
   if (existingError) return existingError;
   if (!existingRow) return { message: "Cart item not found." };
+  const row = existingRow as unknown as CartItemRow;
+
+  const productId = normalizeId(row.product_id);
+  if (!productId) return { message: "Cart item product is invalid." };
+  const { product, error: productError } = await getProductSnapshotById(supabase, productId);
+  if (productError) return productError;
+  if (!product) return { message: "Product not found." };
+  if (!isProductVisible({ status: product.statusRaw } as ProductRow)) {
+    return { message: "Product is inactive." };
+  }
+  if (product.stock != null && qty > product.stock) {
+    return { message: "Quantity exceeds available stock." };
+  }
+
+  const rowUnitPrice = Number(row.unit_price ?? row.price_at_time);
+  const finalUnitPrice =
+    Number.isFinite(rowUnitPrice) && rowUnitPrice >= 0
+      ? rowUnitPrice
+      : product.unitPrice;
+  if (!Number.isFinite(finalUnitPrice) || finalUnitPrice < 0) {
+    return { message: "Cart item unit price is invalid." };
+  }
+
+  const updatePayload: Record<string, unknown> = { quantity: qty };
+  if (await hasColumn(supabase, "cart_items", "unit_price")) {
+    updatePayload.unit_price = finalUnitPrice;
+  }
+  if (await hasColumn(supabase, "cart_items", "price_at_time")) {
+    updatePayload.price_at_time = finalUnitPrice;
+  }
 
   const { error } = await supabase
     .from("cart_items")
-    .update({ quantity: qty })
+    .update(updatePayload)
     .eq(itemPk, itemIdKey)
     .eq("cart_id", cartResult.cartId);
   return error;
@@ -530,14 +759,50 @@ export async function getCartItemByProductId(
     .select(`${itemPk},quantity`)
     .eq("cart_id", cartResult.cartId)
     .eq("product_id", productIdKey)
-    .maybeSingle();
+    .order(itemPk, { ascending: true });
   if (error) return { itemId: null, quantity: 0, error };
-  if (!data) return { itemId: null, quantity: 0, error: null };
-  const row = data as unknown as CartItemRow;
+  const rows = (Array.isArray(data) ? data : []) as unknown as CartItemRow[];
+  if (rows.length === 0) return { itemId: null, quantity: 0, error: null };
+
+  if (rows.length === 1) {
+    const row = rows[0];
+    return {
+      itemId: normalizeId(row[itemPk]),
+      quantity: Math.max(1, Math.floor(normalizeNumber(row.quantity, 1))),
+      error: null,
+    };
+  }
+
+  // Auto-heal duplicate rows for the same product in one cart to keep +/- stable.
+  const canonical = rows[0];
+  const canonicalId = normalizeDbKey(canonical[itemPk]);
+  const mergedQty = rows.reduce((sum, row) => {
+    return sum + Math.max(1, Math.floor(normalizeNumber(row.quantity, 1)));
+  }, 0);
+
+  const { error: mergeError } = await supabase
+    .from("cart_items")
+    .update({ quantity: mergedQty })
+    .eq(itemPk, canonicalId)
+    .eq("cart_id", cartResult.cartId);
+  if (mergeError) return { itemId: null, quantity: 0, error: mergeError };
+
+  const duplicateIds = rows
+    .slice(1)
+    .map((row) => normalizeDbKey(row[itemPk]))
+    .filter((id) => normalizeId(id).length > 0);
+  if (duplicateIds.length > 0) {
+    const { error: deleteDupError } = await supabase
+      .from("cart_items")
+      .delete()
+      .in(itemPk, duplicateIds)
+      .eq("cart_id", cartResult.cartId);
+    if (deleteDupError) return { itemId: null, quantity: 0, error: deleteDupError };
+  }
 
   return {
-    itemId: normalizeId(row[itemPk]),
-    quantity: Math.max(1, Math.floor(normalizeNumber(row.quantity, 1))),
+    itemId: normalizeId(canonical[itemPk]),
+    quantity: mergedQty,
     error: null,
   };
 }
@@ -638,7 +903,7 @@ export async function addOrIncrementCartItem(
     const canonicalItemId = normalizeDbKey(canonical[itemPk]);
     const { error: updateError } = await supabase
       .from("cart_items")
-      .update({ quantity: nextQty, price_at_time: unitPrice })
+      .update({ quantity: nextQty, unit_price: unitPrice, price_at_time: unitPrice })
       .eq(itemPk, canonicalItemId)
       .eq("cart_id", cartResult.cartId);
     if (updateError) return updateError;
@@ -669,6 +934,7 @@ export async function addOrIncrementCartItem(
     product_name: snapshotName,
     sku: snapshotSku,
     quantity: initialQty,
+    unit_price: unitPrice,
     price_at_time: unitPrice,
   });
   return error;
