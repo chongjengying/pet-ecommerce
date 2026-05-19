@@ -161,7 +161,8 @@ export async function PATCH(
     .select("id,quantity")
     .maybeSingle();
 
-  let itemRow = updateById.data;
+  type CartItemRow = { id?: unknown; cart_item_id?: unknown; quantity?: unknown };
+  let itemRow: CartItemRow | null = (updateById.data as unknown as CartItemRow | null) ?? null;
   if (!itemRow) {
     const updateByCartItemId = await supabase
       .from("cart_items")
@@ -176,7 +177,7 @@ export async function PATCH(
         { status: 400 }
       );
     }
-    itemRow = updateByCartItemId.data as { id?: unknown; cart_item_id?: unknown; quantity?: unknown };
+    itemRow = updateByCartItemId.data as unknown as CartItemRow;
   }
 
   // 3) Return minimal payload.

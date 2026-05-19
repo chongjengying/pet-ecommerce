@@ -22,6 +22,8 @@ export type CartRowItem = {
 type CartItemRowProps = {
   item: CartRowItem;
   busy?: boolean;
+  badge?: string;
+  subtitle?: string;
   onDecrease: (itemId: string) => void;
   onIncrease: (itemId: string) => void;
   onRemove: (itemId: string) => void;
@@ -37,54 +39,90 @@ function toProductForImage(item: CartRowItem) {
   };
 }
 
-export default function CartItemRow({ item, busy = false, onDecrease, onIncrease, onRemove }: CartItemRowProps) {
+export default function CartItemRow({
+  item,
+  busy = false,
+  badge,
+  subtitle,
+  onDecrease,
+  onIncrease,
+  onRemove,
+}: CartItemRowProps) {
   const imageUrl = resolveProductImageUrl(toProductForImage(item));
   const outOfStock = item.product.stock != null && item.product.stock <= 0;
   const cannotIncrease = outOfStock || (item.product.stock != null && item.quantity >= item.product.stock);
 
   return (
-    <article className="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:p-5">
-      <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-xl bg-zinc-100 sm:h-28 sm:w-28">
-        <Image src={imageUrl} alt={item.product.name} fill unoptimized className="object-cover" />
-      </div>
-
-      <div className="min-w-0 flex-1">
-        <h3 className="line-clamp-2 text-base font-semibold text-zinc-900">{item.product.name}</h3>
-        <p className="mt-1 text-sm text-zinc-600">RM{item.unit_price.toFixed(2)} each</p>
-
-        <div className="mt-3 flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => onDecrease(item.id)}
-            disabled={busy}
-            aria-label={item.quantity === 1 ? "Keep minimum quantity" : "Decrease quantity"}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-300 text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            -
-          </button>
-          <span className="w-8 text-center text-sm font-medium text-zinc-900">{item.quantity}</span>
-          <button
-            type="button"
-            onClick={() => onIncrease(item.id)}
-            disabled={busy || cannotIncrease}
-            aria-label="Increase quantity"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-300 text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            +
-          </button>
-          <button
-            type="button"
-            onClick={() => onRemove(item.id)}
-            disabled={busy}
-            className="ml-2 text-sm font-medium text-red-600 transition hover:underline disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Remove
-          </button>
+    <article className="rounded-[20px] border border-amber-200/60 bg-white/90 p-4 shadow-sm backdrop-blur transition hover:-translate-y-0.5 hover:shadow-md sm:rounded-3xl sm:p-7">
+      <div className="flex items-center gap-4 sm:gap-7">
+        <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-2xl bg-amber-50 ring-1 ring-black/[0.04] sm:h-28 sm:w-28 sm:rounded-3xl">
+          <Image src={imageUrl} alt={item.product.name} fill unoptimized className="object-cover" />
         </div>
-      </div>
 
-      <div className="text-right text-lg font-semibold text-zinc-900 sm:min-w-[120px]">
-        RM{item.line_total.toFixed(2)}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              {badge ? (
+                <span className="inline-flex rounded-full bg-cream px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-umber ring-1 ring-black/[0.05]">
+                  {badge}
+                </span>
+              ) : null}
+              <h3 className="mt-1 line-clamp-2 text-base font-semibold tracking-tight text-umber sm:mt-2 sm:text-xl">
+                {item.product.name}
+              </h3>
+              <p className="mt-1 text-xs text-umber/55 sm:text-sm">
+                {subtitle ? subtitle : `RM${item.unit_price.toFixed(2)} each`}
+              </p>
+            </div>
+
+            <div className="shrink-0 text-right">
+              <p className="text-sm font-semibold text-terracotta sm:text-base">
+                RM{item.line_total.toFixed(2)}
+              </p>
+              <button
+                type="button"
+                onClick={() => onRemove(item.id)}
+                disabled={busy}
+                className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-umber/55 transition hover:text-umber disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4 fill-current opacity-70">
+                  <path d="M9 3h6a1 1 0 0 1 1 1v1h4a1 1 0 1 1 0 2h-1l-1.2 13.2A2 2 0 0 1 14.81 22H9.19a2 2 0 0 1-1.99-1.8L6 7H5a1 1 0 1 1 0-2h4V4a1 1 0 0 1 1-1Zm2 2v0h2V5h-2ZM8.02 7l1.16 12.76c.02.14.14.24.28.24h5.08c.14 0 .26-.1.28-.24L16 7H8.02Z" />
+                </svg>
+                Remove
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center justify-between gap-3 sm:mt-5">
+            <div className="inline-flex items-center rounded-full bg-cream px-2 py-1.5 ring-1 ring-black/[0.06] sm:px-3 sm:py-2">
+              <button
+                type="button"
+                onClick={() => onDecrease(item.id)}
+                disabled={busy}
+                aria-label={item.quantity === 1 ? "Keep minimum quantity" : "Decrease quantity"}
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full text-umber/80 transition hover:bg-white/70 disabled:cursor-not-allowed disabled:opacity-50 sm:h-9 sm:w-9"
+              >
+                −
+              </button>
+              <span className="w-10 text-center text-sm font-semibold text-umber">{item.quantity}</span>
+              <button
+                type="button"
+                onClick={() => onIncrease(item.id)}
+                disabled={busy || cannotIncrease}
+                aria-label="Increase quantity"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full text-umber/80 transition hover:bg-white/70 disabled:cursor-not-allowed disabled:opacity-50 sm:h-9 sm:w-9"
+              >
+                +
+              </button>
+            </div>
+
+            {outOfStock ? (
+              <span className="text-xs font-semibold text-red-600">Out of stock</span>
+            ) : cannotIncrease ? (
+              <span className="text-xs font-semibold text-umber/55">Max stock reached</span>
+            ) : null}
+          </div>
+        </div>
       </div>
     </article>
   );

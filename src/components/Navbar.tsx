@@ -1,48 +1,25 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import type { RefObject } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useAuth } from "@/components/AuthContext";
 import { useCart } from "@/context/CartContext";
-import { getAvatarInitials, UserAvatar } from "@/components/ui/UserAvatar";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { clearProfileCache } from "@/lib/profileCache";
-import { consumeAuthFlash, setAuthFlash, type AuthFlashTone } from "@/lib/authFlash";
 
-/**
- * Edit this object to change header links and labels — same idea as `footerConfig` in `Footer.tsx`.
- * Cart is only the icon on the right; list primary pages here (not duplicate Cart as text).
- */
-export const headerConfig = {
-  brand: {
-    name: "PAWLUXE",
-    logoSrc: "/logo.png",
-    logoAlt: "PAWLUXE logo",
-    /** Shown if logo image fails to load */
-    monogram: "PL",
-    homeHref: "/",
-  },
-  navLinks: [
-    { href: "/", label: "Home" },
-    { href: "/products", label: "Categories" },
-    { href: "/catalog", label: "Catalog" },
-    { href: "/grooming", label: "Grooming" },
-  ],
-  auth: {
-    loginHref: "/auth/login",
-    loginLabel: "Sign in",
-    signupHref: "/auth/signup",
-    signupLabel: "Create account",
-  },
-} as const;
+type NavLink = { label: string; href: string };
 
-function linkIsActive(pathname: string, href: string): boolean {
-  if (href === "/") return pathname === "/";
-  return pathname === href || pathname.startsWith(`${href}/`);
-}
+const navLinks: NavLink[] = [
+  { label: "Shop", href: "/products" },
+  { label: "Catalog", href: "/catalog" },
+  { label: "Grooming", href: "/grooming" },
+  { label: "About", href: "/about" },
+  { label: "Contact", href: "/contact" },
+];
 
 function CartIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -53,629 +30,476 @@ function CartIcon({ className }: { className?: string }) {
   );
 }
 
+function HamburgerIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+    </svg>
+  );
+}
+
+function CloseIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+    </svg>
+  );
+}
+
+function UserIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 21a8 8 0 10-16 0" />
+      <circle cx="12" cy="8" r="4" strokeWidth={2} />
+    </svg>
+  );
+}
+
+function MapPinIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M12 22s7-6.2 7-12a7 7 0 10-14 0c0 5.8 7 12 7 12z"
+      />
+      <circle cx="12" cy="10" r="2.5" strokeWidth={2} />
+    </svg>
+  );
+}
+
+function LogoutIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 17l5-5-5-5M21 12H9" />
+    </svg>
+  );
+}
+
+function useOnClickOutside<T extends HTMLElement>(ref: RefObject<T | null>, onOutside: () => void, enabled: boolean) {
+  useEffect(() => {
+    if (!enabled) return;
+    const handler = (e: MouseEvent | TouchEvent) => {
+      const node = ref.current;
+      if (!node) return;
+      if (e.target instanceof Node && node.contains(e.target)) return;
+      onOutside();
+    };
+    document.addEventListener("mousedown", handler);
+    document.addEventListener("touchstart", handler, { passive: true });
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      document.removeEventListener("touchstart", handler);
+    };
+  }, [enabled, onOutside, ref]);
+}
+
+function AccountFlyout({
+  open,
+  onClose,
+  onToggle,
+  initials,
+  onLogout,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onToggle: () => void;
+  initials: string;
+  onLogout: () => void;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  useOnClickOutside(containerRef, onClose, open);
+
+  return (
+    <div className="relative" ref={containerRef}>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex h-9 w-9 items-center justify-center rounded-full bg-black text-sm font-bold text-white"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Open account menu"
+      >
+        {initials}
+      </button>
+      <div
+        role="menu"
+        aria-label="Account menu"
+        className={`absolute right-0 top-12 w-64 rounded-2xl border border-black/10 bg-white p-3 shadow-2xl transition-all duration-200 ${
+          open ? "opacity-100 translate-y-0" : "pointer-events-none opacity-0 -translate-y-2"
+        }`}
+      >
+        <div className="space-y-1">
+          <Link
+            role="menuitem"
+            href="/profile"
+            onClick={onClose}
+            className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-black/80 hover:bg-black/5 hover:text-black"
+          >
+            <span className="inline-flex h-5 w-5 items-center justify-center text-black/70">
+              <UserIcon className="h-4 w-4" />
+            </span>
+            Profile
+          </Link>
+          <Link
+            role="menuitem"
+            href="/address-book"
+            onClick={onClose}
+            className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-black/80 hover:bg-black/5 hover:text-black"
+          >
+            <span className="inline-flex h-5 w-5 items-center justify-center text-black/70">
+              <MapPinIcon className="h-4 w-4" />
+            </span>
+            Address book
+          </Link>
+          <button
+            type="button"
+            onClick={() => {
+              onClose();
+              onLogout();
+            }}
+            className="mt-1 flex w-full items-center gap-3 rounded-xl border border-black/10 px-3 py-2.5 text-left text-sm font-semibold text-black/80 hover:bg-black/5 hover:text-black"
+          >
+            <span className="inline-flex h-5 w-5 items-center justify-center text-[#ef4444]">
+              <LogoutIcon className="h-4 w-4" />
+            </span>
+            Logout
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MobileMenu({
+  open,
+  onClose,
+  onOpenCart,
+  cartCount,
+  searchTerm,
+  onSearchTermChange,
+  onSearchSubmit,
+  isAuthenticated,
+  authLoading,
+  initials,
+  username,
+  onLogout,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onOpenCart: () => void;
+  cartCount: number;
+  searchTerm: string;
+  onSearchTermChange: (v: string) => void;
+  onSearchSubmit: () => void;
+  isAuthenticated: boolean;
+  authLoading: boolean;
+  initials: string;
+  username: string;
+  onLogout: () => void;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
+
+  return (
+    <div
+      className={`fixed inset-0 z-[90] md:hidden ${open ? "pointer-events-auto" : "pointer-events-none"}`}
+      aria-hidden={!open}
+    >
+      <button
+        type="button"
+        aria-label="Close menu"
+        className={`absolute inset-0 bg-black/30 backdrop-blur-[1px] transition-opacity ${open ? "opacity-100" : "opacity-0"}`}
+        onClick={onClose}
+      />
+      <div
+        className={`absolute right-0 top-0 h-full w-[88%] max-w-sm bg-white shadow-2xl transition-transform duration-300 ease-out ${
+          open ? "translate-x-0" : "translate-x-full"
+        }`}
+      >
+        <div className="flex h-full flex-col">
+          <div className="flex items-center justify-between border-b border-black/10 px-4 py-4">
+            <p className="text-sm font-black tracking-[-0.04em] text-black">Menu</p>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-9 w-9 items-center justify-center rounded-full hover:bg-black/5"
+              aria-label="Close"
+            >
+              <CloseIcon className="h-5 w-5" />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-4 py-4">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                onSearchSubmit();
+              }}
+              className="flex items-center rounded-2xl border border-black/10 bg-white px-3 py-2"
+            >
+              <input
+                value={searchTerm}
+                onChange={(e) => onSearchTermChange(e.target.value)}
+                placeholder="Search products..."
+                type="search"
+                className="w-full bg-transparent text-sm outline-none"
+              />
+              <button
+                type="submit"
+                className="ml-2 rounded-xl bg-black px-3 py-1.5 text-xs font-semibold text-white"
+              >
+                Search
+              </button>
+            </form>
+
+            <nav className="mt-5 space-y-1">
+              {navLinks.map((link) => (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  onClick={onClose}
+                  className="block rounded-xl px-3 py-2 text-sm font-semibold text-black/80 hover:bg-black/5 hover:text-black"
+                >
+                  {link.label}
+                </Link>
+              ))}
+            </nav>
+
+            <div className="mt-6 rounded-2xl border border-black/10 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-black/50">Quick actions</p>
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenCart();
+                  }}
+                  className="relative flex flex-1 items-center justify-center gap-2 rounded-xl bg-black px-3 py-2 text-sm font-semibold text-white"
+                >
+                  <CartIcon className="h-4 w-4" />
+                  Cart
+                  {cartCount > 0 ? (
+                    <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white">
+                      {cartCount}
+                    </span>
+                  ) : null}
+                </button>
+                {authLoading ? (
+                  <div className="flex h-10 w-10 animate-pulse items-center justify-center rounded-xl bg-black/10" />
+                ) : isAuthenticated ? (
+                  <div className="flex flex-1 items-center justify-between gap-2 rounded-xl border border-black/10 px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-black">{username}</p>
+                      <Link
+                        href="/profile"
+                        onClick={onClose}
+                        className="text-xs font-semibold text-black/60 hover:underline"
+                      >
+                        View profile
+                      </Link>
+                    </div>
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-black text-xs font-bold text-white">
+                      {initials}
+                    </div>
+                  </div>
+                ) : (
+                  <Link
+                    href="/auth/login"
+                    onClick={onClose}
+                    className="flex flex-1 items-center justify-center rounded-xl border border-black/10 px-3 py-2 text-sm font-semibold text-black/80 hover:bg-black/5 hover:text-black"
+                  >
+                    Sign in
+                  </Link>
+                )}
+              </div>
+
+              {isAuthenticated && !authLoading ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onLogout();
+                  }}
+                  className="mt-3 w-full rounded-xl border border-black/10 px-3 py-2 text-left text-sm font-semibold text-black/80 hover:bg-black/5 hover:text-black"
+                >
+                  Logout
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Navbar() {
   const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const { loading: authLoading, user, logout, isAuthenticated } = useAuth() as {
+    loading: boolean;
+    user: null | { username?: string; fullName?: string; email?: string };
+    logout: (opts?: { redirect?: boolean }) => void;
+    isAuthenticated: boolean;
+  };
   const { cartCount, openCartFlyout } = useCart();
-  const [mobileOpen, setMobileOpen] = useState(false);
+
   const [searchTerm, setSearchTerm] = useState("");
-  const [logoBroken, setLogoBroken] = useState(false);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [username, setUsername] = useState<string>("");
-  const [fullName, setFullName] = useState<string>("");
-  const [email, setEmail] = useState<string>("");
-  const [isEmailVerified, setIsEmailVerified] = useState(true);
-  const [resendLoading, setResendLoading] = useState(false);
-  const [resendMessage, setResendMessage] = useState<string | null>(null);
-  const [resendMessageTone, setResendMessageTone] = useState<AuthFlashTone>("info");
-  const [resendBlockedUntil, setResendBlockedUntil] = useState(0);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [flashMessage, setFlashMessage] = useState<string | null>(null);
-  const [flashTone, setFlashTone] = useState<AuthFlashTone>("success");
-  const menuRef = useRef<HTMLDivElement | null>(null);
-
-  const cleanDisplayName = (value: string): string =>
-    value
-      .trim()
-      .replace(/^(mr|mrs|ms|miss|dr|prof)\.?\s+/i, "")
-      .replace(/\s+/g, " ");
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
-    let active = true;
-
-    const syncAuthState = async () => {
-      try {
-        setAuthLoading(true);
-        const token = typeof window !== "undefined" ? localStorage.getItem("customer_jwt_token") : null;
-        const res = await fetch("/api/auth/me", {
-          method: "GET",
-          cache: "no-store",
-          credentials: "same-origin",
-          headers: {
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-        });
-        if (!active) return;
-        if (!res.ok) {
-          setIsAuthenticated(false);
-          setUsername("");
-          setFullName("");
-          setEmail("");
-          setIsEmailVerified(true);
-          return;
-        }
-        const payload = (await res.json().catch(() => ({}))) as {
-          user?: { username?: string; full_name?: string | null; email?: string; isEmailVerified?: boolean };
-        };
-        setIsAuthenticated(true);
-        setUsername(payload.user?.username ?? "");
-        setFullName(payload.user?.full_name ?? "");
-        setEmail(payload.user?.email ?? "");
-        setIsEmailVerified(payload.user?.isEmailVerified !== false);
-      } catch {
-        if (!active) return;
-        setIsAuthenticated(false);
-        setUsername("");
-        setFullName("");
-        setEmail("");
-        setIsEmailVerified(true);
-      } finally {
-        if (!active) return;
-        setAuthLoading(false);
-      }
-    };
-    void syncAuthState();
-
-    const onAuthChanged = () => {
-      void syncAuthState();
-    };
-    const onStorage = (event: StorageEvent) => {
-      if (event.key === "customer_jwt_token") {
-        void syncAuthState();
-      }
-    };
-    const onWindowFocus = () => {
-      void syncAuthState();
-    };
-
-    window.addEventListener("customer-auth-changed", onAuthChanged);
-    window.addEventListener("storage", onStorage);
-    window.addEventListener("focus", onWindowFocus);
-
+    if (!mobileOpen) return;
+    document.documentElement.style.overflow = "hidden";
     return () => {
-      active = false;
-      window.removeEventListener("customer-auth-changed", onAuthChanged);
-      window.removeEventListener("storage", onStorage);
-      window.removeEventListener("focus", onWindowFocus);
+      document.documentElement.style.overflow = "";
     };
-  }, []);
+  }, [mobileOpen]);
 
-  useEffect(() => {
-    const flash = consumeAuthFlash();
-    if (!flash) return;
-    setFlashMessage(flash.message);
-    setFlashTone(flash.tone);
-  }, [pathname]);
+  const username = useMemo(() => user?.username ?? user?.email ?? "Account", [user]);
+  const initials = useMemo(() => {
+    if (!user) return "G";
+    const base = String(user.fullName || user.username || user.email || "Guest");
+    const tokens = base.split(" ").filter(Boolean);
+    const firstTwo = tokens.slice(0, 2);
+    const result = firstTwo.map((t) => t[0]?.toUpperCase() ?? "").join("");
+    return result || "P";
+  }, [user]);
 
-  useEffect(() => {
-    if (pathname !== "/products") return;
-    setSearchTerm(searchParams.get("q") ?? "");
-  }, [pathname, searchParams]);
-
-  useEffect(() => {
-    if (!flashMessage) return;
-    const timer = window.setTimeout(() => {
-      setFlashMessage(null);
-    }, 3500);
-    return () => window.clearTimeout(timer);
-  }, [flashMessage]);
-
-  useEffect(() => {
-    if (resendBlockedUntil <= Date.now()) return;
-    const msUntilUnblock = resendBlockedUntil - Date.now();
-    const timer = window.setTimeout(() => {
-      setResendBlockedUntil(0);
-    }, msUntilUnblock);
-    return () => window.clearTimeout(timer);
-  }, [resendBlockedUntil]);
-
-  useEffect(() => {
-    if (isAuthenticated) {
-      router.prefetch("/profile");
-    }
-  }, [isAuthenticated, router]);
-
-  useEffect(() => {
-    const closeOnOutsideClick = (event: MouseEvent) => {
-      if (!menuRef.current) return;
-      if (!menuRef.current.contains(event.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", closeOnOutsideClick);
-    return () => document.removeEventListener("mousedown", closeOnOutsideClick);
-  }, []);
-
-  const onLogout = async () => {
-    const refreshStartedAt = Date.now();
-    await fetch("/api/auth/logout", { method: "POST", cache: "no-store", credentials: "same-origin" });
-    clearProfileCache();
-    localStorage.removeItem("customer_jwt_token");
-    window.dispatchEvent(new Event("customer-auth-changed"));
-    setAuthFlash("Signed out. Please sign in again to continue.", "info");
-    setIsAuthenticated(false);
-    setUsername("");
-    setFullName("");
-    setEmail("");
-    setIsEmailVerified(true);
-    setMenuOpen(false);
+  const onSearchSubmit = () => {
+    const q = searchTerm.trim();
+    if (!q) return;
+    setAccountMenuOpen(false);
     setMobileOpen(false);
-    router.replace("/auth/login");
-    if (process.env.NODE_ENV !== "production") {
-      console.log("[router.refresh] trigger from Navbar.onLogout", {
-        at: refreshStartedAt,
-        note: "This can re-run server components and re-fetch route data.",
-      });
-    }
-    router.refresh();
+    router.push(`/products?q=${encodeURIComponent(q)}`);
   };
 
-  const onResendVerificationEmail = async () => {
-    if (resendBlockedUntil > Date.now()) {
-      setResendMessageTone("error");
-      setResendMessage("You've requested verification too many times. Please wait a few minutes before trying again.");
-      return;
-    }
-
-    setResendMessage(null);
-    setResendLoading(true);
-    try {
-      const token = typeof window !== "undefined" ? localStorage.getItem("customer_jwt_token") : null;
-      const response = await fetch("/api/auth/verification/resend", {
-        method: "POST",
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      });
-      const payload = (await response.json().catch(() => ({}))) as {
-        success?: boolean;
-        message?: string;
-        error?: string;
-        alreadyVerified?: boolean;
-        retryAfterSeconds?: number;
-      };
-      if (!response.ok || !payload.success) {
-        if (response.status === 429) {
-          const retryAfterSeconds =
-            typeof payload.retryAfterSeconds === "number" ? Math.max(1, payload.retryAfterSeconds) : 300;
-          setResendBlockedUntil(Date.now() + retryAfterSeconds * 1000);
-          setResendMessageTone("error");
-          setResendMessage("You've requested verification too many times. Please wait a few minutes before trying again.");
-          return;
-        }
-        setResendMessageTone("error");
-        setResendMessage(payload.error || "Could not resend verification email.");
-        return;
-      }
-      if (payload.alreadyVerified) {
-        setIsEmailVerified(true);
-        setResendMessageTone("success");
-        setResendMessage(payload.message || "Email is already verified.");
-        return;
-      }
-      setResendMessageTone("success");
-      setResendMessage(payload.message || "Verification email sent. Please check your inbox.");
-    } catch {
-      setResendMessageTone("error");
-      setResendMessage("Could not resend verification email. Please try again.");
-    } finally {
-      setResendLoading(false);
-    }
-  };
-
-  const displayName = useMemo(() => {
-    const cleaned = cleanDisplayName(fullName);
-    return cleaned || username.replace(/^@+/, "") || "Customer";
-  }, [fullName, username]);
-
-  const initials = useMemo(() => getAvatarInitials(displayName, username.trim() || "U"), [displayName, username]);
-
-  const navLinkClass = (href: string) => {
-    const active = linkIsActive(pathname, href);
-    return [
-      "relative rounded-lg px-2 py-1.5 text-sm font-medium transition",
-      active ? "text-sage" : "text-umber/75 hover:text-umber",
-      "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sage/50",
-    ].join(" ");
-  };
-
-  const renderDesktopNavLink = (href: string, label: string) => {
-    const active = linkIsActive(pathname, href);
-    return (
-      <Link
-        href={href}
-        className={navLinkClass(href)}
-        aria-current={active ? "page" : undefined}
-      >
-        {label}
-        {active && <span className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full bg-sage/80" aria-hidden="true" />}
-      </Link>
-    );
-  };
-
-  const onSearchSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const query = searchTerm.trim();
-    const destination = query ? `/products?q=${encodeURIComponent(query)}` : "/products";
-    router.push(destination);
+  const onLogout = () => {
+    setAccountMenuOpen(false);
     setMobileOpen(false);
+    logout({ redirect: true });
   };
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-amber-200/80 bg-gradient-to-b from-cream via-cream to-amber-50/40 backdrop-blur supports-[backdrop-filter]:bg-cream/90">
-      {!authLoading && isAuthenticated && !isEmailVerified ? (
-        <div className="border-b border-amber-200 bg-amber-50/90">
-          <div className="mx-auto flex w-full max-w-6xl flex-col gap-2 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-            <p className="text-sm font-medium text-amber-900">Check your email to verify your account.</p>
-            <button
-              type="button"
-              onClick={() => void onResendVerificationEmail()}
-              disabled={resendLoading || resendBlockedUntil > Date.now()}
-              className="inline-flex min-h-[36px] items-center justify-center rounded-xl border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {resendLoading ? "Sending..." : "Resend verification email"}
-            </button>
-          </div>
-          {resendMessage ? (
-            <div
-              className={`mx-auto mb-2 w-full max-w-6xl rounded-xl border px-3 py-2 text-xs sm:px-6 ${
-                resendMessageTone === "error"
-                  ? "border-red-200 bg-red-50 text-red-700"
-                  : resendMessageTone === "info"
-                    ? "border-sky-200 bg-sky-50 text-sky-700"
-                    : "border-emerald-200 bg-emerald-50 text-emerald-800"
-              }`}
-              role="status"
-            >
-              {resendMessage}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-      {flashMessage ? (
-        <div
-          className={`mx-auto mt-2 w-[min(92%,560px)] rounded-2xl border px-4 py-2.5 text-center text-sm font-medium shadow-sm ${
-            flashTone === "error"
-              ? "border-red-200 bg-red-50 text-red-700"
-              : flashTone === "info"
-                ? "border-sky-200 bg-sky-50 text-sky-700"
-                : "border-emerald-200 bg-emerald-50 text-emerald-800"
-          }`}
-          role="status"
-        >
-          {flashMessage}
-        </div>
-      ) : null}
-      <nav
-        className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3.5 sm:px-6"
-        aria-label="Primary"
-      >
-        <Link
-          href={headerConfig.brand.homeHref}
-          className="group flex min-w-0 shrink items-center gap-3 text-umber"
-        >
-          {!logoBroken ? (
-            <img
-              src={headerConfig.brand.logoSrc}
-              alt={headerConfig.brand.logoAlt}
-              className="h-9 w-9 shrink-0 rounded-full object-cover ring-1 ring-amber-300/60 transition group-hover:ring-sage/40"
-              onError={() => setLogoBroken(true)}
-            />
-          ) : (
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-umber text-xs font-semibold text-amber-100">
-              {headerConfig.brand.monogram}
-            </span>
-          )}
-          <span className="truncate text-lg font-bold tracking-[0.08em] sm:text-xl">{headerConfig.brand.name}</span>
-        </Link>
-
-        <form
-          onSubmit={onSearchSubmit}
-          className="hidden w-full max-w-md items-center overflow-hidden rounded-full border border-amber-200/80 bg-white/95 shadow-sm ring-1 ring-transparent transition focus-within:border-sage/40 focus-within:ring-sage/20 lg:flex"
-          role="search"
-          aria-label="Search products"
-        >
-          <label htmlFor="header-search" className="sr-only">
-            Search products
-          </label>
-          <span className="pl-4 text-umber/50" aria-hidden="true">
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-              />
-            </svg>
-          </span>
-          <input
-            id="header-search"
-            type="search"
-            value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder="Search pet products"
-            className="min-w-0 flex-1 border-0 bg-transparent px-3 py-2.5 text-sm text-umber placeholder:text-umber/45 focus:outline-none"
-          />
-          <button
-            type="submit"
-            className="mr-1.5 rounded-full bg-sage/90 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sage"
+    <>
+      <header className="sticky top-0 z-50 w-full px-3 pt-3">
+        <div className="mx-auto flex max-w-7xl items-center justify-between rounded-2xl border border-white/60 bg-white/70 px-4 py-3 shadow-xl backdrop-blur-xl">
+          <Link
+            href="/"
+            className="flex items-center gap-2 text-xl font-black tracking-[-0.04em] text-black"
+            onClick={() => {
+              setMobileOpen(false);
+              setAccountMenuOpen(false);
+            }}
           >
-            Search
-          </button>
-        </form>
+            <span className="text-2xl">🐾</span>
+            PAWLUXE
+          </Link>
 
-        {/* Desktop nav */}
-        <ul className="hidden items-center gap-1 md:flex">
-          {headerConfig.navLinks.map(({ href, label }) => (
-            <li key={href}>{renderDesktopNavLink(href, label)}</li>
-          ))}
-          <li className="ml-2 flex items-center border-l border-amber-200/80 pl-4">
-            {authLoading ? (
-              <span className="inline-block h-9 w-24 animate-pulse rounded-xl bg-amber-100/90" />
-            ) : isAuthenticated ? (
-              <div className="relative" ref={menuRef}>
-                <button
-                  type="button"
-                  onClick={() => setMenuOpen((prev) => !prev)}
-                  className="rounded-full transition hover:opacity-[0.94] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sage/50"
-                  aria-expanded={menuOpen}
-                  aria-haspopup="true"
-                  aria-label={`Account menu, ${displayName || "signed in"}`}
-                >
-                  <UserAvatar
-                    src={null}
-                    alt={displayName ? `Avatar for ${displayName}` : "Account"}
-                    initials={initials}
-                    size="sm"
-                  />
-                </button>
-                <div
-                  className={`absolute right-0 mt-2 w-72 origin-top-right rounded-[28px] border border-amber-200/80 bg-[#fffdf8] p-6 shadow-[0_24px_60px_rgba(55,42,24,0.16)] ring-1 ring-amber-100/70 transition duration-150 ${
-                    menuOpen ? "translate-y-0 opacity-100" : "pointer-events-none -translate-y-1 opacity-0"
-                  }`}
-                >
-                  <p className="font-mono text-xs font-semibold uppercase tracking-[0.22em] text-umber/65">
-                    Signed in
-                  </p>
-                  <div className="mt-4 border-t border-dashed border-amber-300/90 pt-4">
-                    <div className="flex items-start gap-4">
-                      <div className="pt-0.5">
-                        <span className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-xl border border-amber-300/80 bg-white px-2 text-sm font-semibold text-umber">
-                          {initials}
-                        </span>
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-xl font-semibold tracking-tight text-umber">{displayName}</p>
-                        <p className="mt-1 break-all text-sm text-umber/70">{email || "No email available"}</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-6 border-t border-dashed border-amber-300/90 pt-4">
-                    <Link
-                      href="/profile"
-                      onClick={() => setMenuOpen(false)}
-                      className="block rounded-xl px-3 py-2.5 text-base text-umber/90 transition hover:bg-amber-50"
-                    >
-                      Profile
-                    </Link>
-                    <Link
-                      href="/profile/orders"
-                      onClick={() => setMenuOpen(false)}
-                      className="block rounded-xl px-3 py-2.5 text-base text-umber/90 transition hover:bg-amber-50"
-                    >
-                      Orders
-                    </Link>
-                    <Link
-                      href="/address-book"
-                      onClick={() => setMenuOpen(false)}
-                      className="block rounded-xl px-3 py-2.5 text-base text-umber/90 transition hover:bg-amber-50"
-                    >
-                      Addresses
-                    </Link>
-                    <button
-                      type="button"
-                      onClick={() => void onLogout()}
-                      className="mt-1 w-full rounded-xl px-3 py-2.5 text-left text-base text-umber/90 transition hover:bg-amber-50"
-                    >
-                      Sign out
-                    </button>
-                  </div>
-                </div>
-              </div>
+          <div className="hidden items-center gap-8 md:flex">
+            {navLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className="text-sm font-semibold text-black/70 transition hover:text-black"
+              >
+                {link.label}
+              </Link>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                onSearchSubmit();
+              }}
+              className="hidden items-center rounded-full border border-black/10 bg-white px-3 py-2 lg:flex"
+            >
+              <input
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search products..."
+                type="search"
+                className="w-44 bg-transparent text-sm outline-none"
+              />
+              <button
+                type="submit"
+                className="ml-2 rounded-full bg-black px-3 py-1.5 text-xs font-semibold text-white"
+              >
+                Search
+              </button>
+            </form>
+
+            {!authLoading && isAuthenticated ? (
+              <AccountFlyout
+                open={accountMenuOpen}
+                onClose={() => setAccountMenuOpen(false)}
+                onToggle={() => setAccountMenuOpen((p) => !p)}
+                initials={initials}
+                onLogout={onLogout}
+              />
             ) : (
-              <div className="flex items-center gap-2">
-                <Link
-                  href={headerConfig.auth.loginHref}
-                  className="rounded-full px-3 py-2 text-sm font-medium text-umber/85 transition hover:bg-white/80 hover:text-umber"
-                >
-                  {headerConfig.auth.loginLabel}
-                </Link>
-                <Link
-                  href={headerConfig.auth.signupHref}
-                  className="rounded-full bg-sage/90 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-sage"
-                >
-                  {headerConfig.auth.signupLabel}
-                </Link>
-              </div>
+              <Link href="/auth/login" className="hidden text-sm font-semibold text-black/70 md:block">
+                Sign in
+              </Link>
             )}
-          </li>
-          <li>
+
             <button
               type="button"
-              onClick={openCartFlyout}
-              className="relative flex h-10 w-10 items-center justify-center rounded-full bg-white text-umber shadow-sm ring-1 ring-amber-200/80 transition hover:bg-amber-50 hover:ring-sage/30"
+              onClick={() => {
+                setAccountMenuOpen(false);
+                openCartFlyout();
+              }}
+              className="relative flex h-10 w-10 items-center justify-center rounded-full bg-black text-white"
               aria-label="Open cart"
             >
               <CartIcon className="h-5 w-5" />
-              {cartCount > 0 && (
-                <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-terracotta px-1 text-xs font-semibold text-white">
-                  {cartCount > 99 ? "99+" : cartCount}
+              {cartCount > 0 ? (
+                <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 text-xs font-bold text-white">
+                  {cartCount}
                 </span>
-              )}
+              ) : null}
             </button>
-          </li>
-        </ul>
 
-        {/* Mobile: cart + menu */}
-        <div className="flex items-center gap-2 md:hidden">
-          <button
-            type="button"
-            onClick={openCartFlyout}
-            className="relative flex h-10 w-10 items-center justify-center rounded-full bg-white text-umber shadow-sm ring-1 ring-amber-200/80"
-            aria-label="Open cart"
-          >
-            <CartIcon className="h-5 w-5" />
-            {cartCount > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-terracotta px-1 text-xs font-semibold text-white">
-                {cartCount > 99 ? "99+" : cartCount}
-              </span>
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={() => setMobileOpen((o) => !o)}
-            className="flex h-10 w-10 items-center justify-center rounded-xl border border-amber-200/90 bg-white/80 text-umber shadow-sm transition hover:border-sage/40"
-            aria-expanded={mobileOpen}
-            aria-label={mobileOpen ? "Close menu" : "Open menu"}
-          >
-            {mobileOpen ? (
-              <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            ) : (
-              <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            )}
-          </button>
-        </div>
-      </nav>
-
-      {/* Mobile panel */}
-      {mobileOpen && (
-        <div className="border-t border-amber-200/70 bg-gradient-to-b from-cream to-amber-50/30 px-4 py-4 md:hidden">
-          <form
-            onSubmit={onSearchSubmit}
-            className="mb-3 flex items-center overflow-hidden rounded-xl border border-amber-200/80 bg-white shadow-sm ring-1 ring-transparent focus-within:border-sage/40 focus-within:ring-sage/20"
-            role="search"
-            aria-label="Search products"
-          >
-            <label htmlFor="header-search-mobile" className="sr-only">
-              Search products
-            </label>
-            <span className="pl-3 text-umber/50" aria-hidden="true">
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                />
-              </svg>
-            </span>
-            <input
-              id="header-search-mobile"
-              type="search"
-              value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="Search pet products"
-              className="min-w-0 flex-1 border-0 bg-transparent px-3 py-2.5 text-sm text-umber placeholder:text-umber/45 focus:outline-none"
-            />
             <button
-              type="submit"
-              className="mr-1.5 rounded-lg bg-sage/90 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-sage"
+              type="button"
+              onClick={() => {
+                setAccountMenuOpen(false);
+                setMobileOpen((p) => !p);
+              }}
+              className="flex h-10 w-10 items-center justify-center rounded-xl border border-black/10 bg-white/80 md:hidden"
+              aria-label="Open menu"
+              aria-expanded={mobileOpen}
             >
-              Go
+              {mobileOpen ? <CloseIcon className="h-5 w-5" /> : <HamburgerIcon className="h-5 w-5" />}
             </button>
-          </form>
-          <ul className="flex flex-col gap-1">
-            {headerConfig.navLinks.map(({ href, label }) => (
-              <li key={href}>
-                <Link
-                  href={href}
-                  onClick={() => setMobileOpen(false)}
-                  className={`block rounded-xl px-3 py-2.5 text-sm font-medium ${
-                    linkIsActive(pathname, href) ? "bg-white text-sage shadow-sm ring-1 ring-amber-100" : "text-umber hover:bg-white/70"
-                  }`}
-                >
-                  {label}
-                </Link>
-              </li>
-            ))}
-            <li className="my-2 border-t border-amber-200/60 pt-2">
-              {authLoading ? (
-                <div className="h-10 animate-pulse rounded-xl bg-amber-100/90" />
-              ) : isAuthenticated ? (
-                <>
-                  <p className="px-3 py-1 text-xs font-medium uppercase tracking-wide text-umber/45">Account</p>
-                  <p className="px-3 py-1 text-sm font-semibold text-umber">{displayName}</p>
-                  <p className="px-3 pb-1 text-xs text-umber/60">{email || username?.replace(/^@+/, "")}</p>
-                  <Link
-                    href="/profile"
-                    onClick={() => setMobileOpen(false)}
-                    className="mt-1 block rounded-xl px-3 py-2.5 text-sm font-medium text-umber hover:bg-white/80"
-                  >
-                    Profile
-                  </Link>
-                  <Link
-                    href="/profile/orders"
-                    onClick={() => setMobileOpen(false)}
-                    className="mt-1 block rounded-xl px-3 py-2.5 text-sm font-medium text-umber hover:bg-white/80"
-                  >
-                    Orders
-                  </Link>
-                  <Link
-                    href="/address-book"
-                    onClick={() => setMobileOpen(false)}
-                    className="mt-1 block rounded-xl px-3 py-2.5 text-sm font-medium text-umber hover:bg-white/80"
-                  >
-                    Addresses
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMobileOpen(false);
-                      void onLogout();
-                    }}
-                    className="mt-1 block w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium text-umber hover:bg-white/80"
-                  >
-                    Sign out
-                  </button>
-                </>
-              ) : (
-                <div className="flex flex-col gap-2 px-1">
-                  <Link
-                    href={headerConfig.auth.loginHref}
-                    onClick={() => setMobileOpen(false)}
-                    className="block rounded-xl border border-amber-200/90 bg-white px-3 py-2.5 text-center text-sm font-medium text-umber shadow-sm"
-                  >
-                    {headerConfig.auth.loginLabel}
-                  </Link>
-                  <Link
-                    href={headerConfig.auth.signupHref}
-                    onClick={() => setMobileOpen(false)}
-                    className="block rounded-xl bg-sage/90 px-3 py-2.5 text-center text-sm font-medium text-white shadow-sm"
-                  >
-                    {headerConfig.auth.signupLabel}
-                  </Link>
-                </div>
-              )}
-            </li>
-          </ul>
+          </div>
         </div>
-      )}
-    </header>
+      </header>
+
+      <MobileMenu
+        open={mobileOpen}
+        onClose={() => setMobileOpen(false)}
+        onOpenCart={openCartFlyout}
+        cartCount={cartCount}
+        searchTerm={searchTerm}
+        onSearchTermChange={setSearchTerm}
+        onSearchSubmit={onSearchSubmit}
+        isAuthenticated={Boolean(isAuthenticated)}
+        authLoading={Boolean(authLoading)}
+        initials={initials}
+        username={username}
+        onLogout={onLogout}
+      />
+    </>
   );
 }

@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Not part of the Next.js TypeScript app lint surface:
+    "backend-auth/**",
+    "scripts/**",
   ]),
 ]);
 

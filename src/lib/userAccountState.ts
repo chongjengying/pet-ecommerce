@@ -1,7 +1,13 @@
 import { userIdForDbQuery } from "@/lib/userIdDb";
 
 type SupabaseLike = {
-  from: (table: string) => any;
+  from: (table: string) => {
+    select: (columns: string) => {
+      eq: (column: string, value: unknown) => {
+        maybeSingle: () => PromiseLike<{ data: unknown; error: { message?: string } | null }>;
+      };
+    };
+  };
 };
 
 function isMissingColumnError(error: { message?: string } | null | undefined): boolean {
@@ -18,15 +24,16 @@ function parseIsActive(value: unknown): boolean | null {
 }
 
 export async function isUserAccountActive(
-  supabase: SupabaseLike,
+  supabase: unknown,
   userId: string | number
 ): Promise<{ active: boolean; status: string | null; error: string | null }> {
+  const client = supabase as SupabaseLike;
   const idKey = userIdForDbQuery(userId);
   const attempts = ["account_status,status,is_active", "account_status,is_active", "status,is_active", "account_status", "status", "is_active"] as const;
 
   let sawMissingColumn = false;
   for (const select of attempts) {
-    const { data, error } = await supabase
+    const { data, error } = await client
       .from("users")
       .select(select)
       .eq("id", idKey)

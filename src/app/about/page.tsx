@@ -1,47 +1,37 @@
+import Image from "next/image";
 import Link from "next/link";
 import MarketingPageChrome from "@/components/marketing/MarketingPageChrome";
 
 export const metadata = {
   title: "About Us - PAWLUXE",
-  description: "Learn about Pawluxe, our story, mission, and love for pets.",
+  description: "Our story, promise, impact, and vision for pet families.",
 };
 
-const card =
-  "rounded-xl border border-brand-border bg-white p-6 shadow-sm sm:p-8";
-
-const reasons = [
+const promiseItems = [
   {
-    title: "High-quality products",
-    description: "We carefully select products that meet quality and comfort standards for pets.",
+    title: "Luxury Ingredients",
+    desc: "Premium ingredients selected for quality, nutrition, and safety.",
   },
   {
-    title: "Affordable pricing",
-    description: "Premium does not have to mean expensive. We keep pricing fair and transparent.",
+    title: "Uncompromising Quality",
+    desc: "Every product is curated with strict standards and consistency.",
   },
   {
-    title: "Fast delivery",
-    description: "Your pet essentials arrive quickly so you can care for your pets without delay.",
-  },
-  {
-    title: "Pet-safe materials",
-    description: "We prioritize safety and reliability in every product listed on Pawluxe.",
+    title: "Dedicated Support",
+    desc: "Responsive support to help pet parents shop with confidence.",
   },
 ];
 
-const coreValues = [
-  { title: "Excellence", icon: "★" },
-  { title: "Care", icon: "♡" },
-  { title: "Innovation", icon: "💡" },
-  { title: "Professionalism", icon: "🏅" },
-  { title: "Consistency", icon: "⟳" },
-  { title: "Enjoyment", icon: "☺" },
-  { title: "Value for money", icon: "💰" },
+const impactItems = [
+  { value: "1000+", label: "HAPPY PARENTS" },
+  { value: "5+", label: "COUNTRIES" },
+  { value: "PREMIUM", label: "PARTNERS" },
 ];
 
 export default function AboutPage() {
   return (
-    <section className="bg-white">
-      <div className="mx-auto max-w-6xl px-4 pb-14 pt-0 sm:px-6 lg:pb-16">
+    <section className="bg-[#efeae3]">
+      <div className="mx-auto max-w-6xl px-4 pb-12 pt-0 sm:px-6 lg:pb-14">
         <MarketingPageChrome
           breadcrumbs={[
             { label: "Home", href: "/" },
@@ -49,119 +39,85 @@ export default function AboutPage() {
           ]}
         />
 
-        <div className="mt-6 grid gap-6 lg:grid-cols-2 lg:gap-8">
-          <div className={`${card} flex flex-col justify-center`}>
-            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">About Us</p>
-            <h1 className="mt-2 text-3xl font-bold tracking-tight text-neutral-900 sm:text-4xl">
-              About Pawluxe
-            </h1>
-            <p className="mt-3 text-base leading-relaxed text-neutral-600">
-              Caring for your pets with quality and love
-            </p>
-            <p className="mt-4 text-sm leading-7 text-neutral-600">
-              Pawluxe is built for pet parents who want products they can trust. We believe every pet
-              deserves safe, quality essentials and every customer deserves a smooth and friendly shopping
-              experience.
-            </p>
-          </div>
-
-          <div className="overflow-hidden rounded-xl border border-brand-border bg-white shadow-sm">
-            <img
-              src="https://images.unsplash.com/photo-1517849845537-4d257902454a?auto=format&fit=crop&w=1200&q=80"
-              alt="Happy dog in a cozy setting"
-              className="h-full min-h-[280px] w-full object-cover"
-              loading="lazy"
-            />
-          </div>
-        </div>
-
-        <div className="mt-8 grid gap-6 lg:grid-cols-2">
-          <div className={card}>
-            <h2 className="text-xl font-bold text-neutral-900">Brand Story</h2>
-            <p className="mt-3 text-sm leading-7 text-neutral-600">
-              Pawluxe was created to provide high-quality, affordable pet products for everyday pet care.
-              Our brand is rooted in genuine love for pets and built on long-term customer trust.
-            </p>
-          </div>
-
-          <div className={card}>
-            <h2 className="text-xl font-bold text-neutral-900">Mission & Vision</h2>
-            <div className="mt-3 space-y-3 text-sm text-neutral-600">
-              <p>
-                <span className="font-semibold text-neutral-900">Mission:</span> Provide safe, premium, and
-                affordable pet products.
+        <div className="mt-4 overflow-hidden rounded-[26px] border border-[#d6cec2] bg-[#f6f3ee] shadow-[0_10px_30px_rgba(67,53,35,0.08)]">
+          <div className="grid gap-0 lg:grid-cols-[1.25fr_1fr]">
+            <div className="border-b border-[#ddd3c6] p-6 lg:border-b-0 lg:border-r lg:p-7">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#9d8d73]">About Us</p>
+              <h1 className="mt-2 text-4xl font-semibold tracking-tight text-[#1f1a16] sm:text-5xl">Our Story</h1>
+              <p className="mt-3 max-w-xl text-sm leading-7 text-[#3b332c]">
+                Pawluxe was born from a simple belief: pet wellness should feel premium, safe, and approachable.
+                We build a trusted ecosystem of products and services that helps pet families care better every day.
               </p>
-              <p>
-                <span className="font-semibold text-neutral-900">Vision:</span> Become a trusted pet brand
-                in Malaysia.
-              </p>
+
+              <div className="mt-5 overflow-hidden rounded-2xl border border-[#d9cebd]">
+                <Image
+                  src="/HomePage.png"
+                  alt="Pawluxe story"
+                  width={1200}
+                  height={700}
+                  className="h-56 w-full object-cover sm:h-64"
+                />
+              </div>
+
+              <h2 className="mt-6 text-4xl font-semibold tracking-tight text-[#1f1a16]">The Pawluxe Promise</h2>
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                {promiseItems.map((item) => (
+                  <article key={item.title} className="rounded-xl border border-[#ddd1c2] bg-white/60 p-3">
+                    <p className="text-sm font-semibold text-[#1f1a16]">{item.title}</p>
+                    <p className="mt-1 text-xs leading-5 text-[#4f463d]">{item.desc}</p>
+                  </article>
+                ))}
+              </div>
+            </div>
+
+            <div className="p-6 lg:p-7">
+              <h2 className="text-4xl font-semibold tracking-tight text-[#1f1a16]">The Pawluxe Promise</h2>
+              <div className="mt-4 space-y-4">
+                {promiseItems.map((item) => (
+                  <div key={`right-${item.title}`} className="rounded-xl border border-[#ddd1c2] bg-white/70 p-4">
+                    <p className="text-sm font-semibold text-[#1f1a16]">{item.title}</p>
+                    <p className="mt-1 text-xs leading-5 text-[#4f463d]">{item.desc}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-6 rounded-2xl border border-[#d9cebd] bg-white/65 p-4">
+                <h3 className="text-3xl font-semibold tracking-tight text-[#1f1a16]">Global Vision</h3>
+                <p className="mt-2 text-sm leading-6 text-[#4f463d]">
+                  Expanding across Southeast Asia with Malaysia as our operational core.
+                  We are building a regional pet ecosystem driven by quality and trust.
+                </p>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className={`mt-8 ${card}`}>
-          <h2 className="text-center text-2xl font-semibold tracking-tight text-neutral-900 sm:text-3xl">
-            Core Values
-          </h2>
-          <p className="mx-auto mt-3 max-w-3xl text-center text-sm leading-relaxed text-neutral-600">
-            Everything we do at Pawluxe is guided by values that shape how we serve pets and their
-            families.
-          </p>
-          <div className="mx-auto mt-8 grid max-w-5xl grid-cols-2 gap-3 sm:gap-4 md:grid-cols-4">
-            {coreValues.map((value) => (
-              <article
-                key={value.title}
-                className="flex min-h-[140px] flex-col items-center justify-center rounded-xl border border-brand-border bg-neutral-50/50 p-4 text-center transition hover:border-brand-accent/40"
-              >
-                <span className="text-3xl leading-none text-brand-accent" aria-hidden="true">
-                  {value.icon}
-                </span>
-                <p className="mt-3 text-sm font-semibold text-neutral-900">{value.title}</p>
-              </article>
-            ))}
-          </div>
-        </div>
+          <div className="grid border-t border-[#ddd3c6] lg:grid-cols-[1.25fr_1fr]">
+            <div className="border-b border-[#ddd3c6] bg-[#efe7dc] p-6 lg:border-b-0 lg:border-r lg:p-7">
+              <h2 className="text-center text-4xl font-semibold tracking-tight text-[#1f1a16]">Our Impact</h2>
+              <div className="mt-5 grid grid-cols-3 gap-3">
+                {impactItems.map((item) => (
+                  <article key={item.label} className="rounded-xl border border-[#d6cab8] bg-[#f7f3ec] p-4 text-center">
+                    <p className="text-4xl font-semibold tracking-tight text-[#1f1a16]">{item.value}</p>
+                    <p className="mt-1 text-xs font-semibold tracking-[0.14em] text-[#3f372f]">{item.label}</p>
+                  </article>
+                ))}
+              </div>
+            </div>
 
-        <div className={`mt-8 ${card}`}>
-          <h2 className="text-xl font-bold text-neutral-900">Why Choose Us</h2>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 sm:gap-4">
-            {reasons.map((item) => (
-              <article
-                key={item.title}
-                className="rounded-xl border border-brand-border bg-neutral-50/30 p-4 transition hover:border-brand-accent/30"
-              >
-                <h3 className="text-sm font-semibold text-neutral-900">{item.title}</h3>
-                <p className="mt-2 text-sm leading-relaxed text-neutral-600">{item.description}</p>
-              </article>
-            ))}
-          </div>
-        </div>
-
-        <div className={`mt-8 ${card}`}>
-          <h2 className="text-xl font-bold text-neutral-900">Founder</h2>
-          <p className="mt-3 text-sm leading-7 text-neutral-600">
-            Hi, I am Jason, founder of Pawluxe. I am passionate about creating a pet brand that feels warm,
-            honest, and dependable. My goal is simple: help pet families find products they feel good
-            about, every single day.
-          </p>
-        </div>
-
-        <div
-          className={`mt-8 flex flex-col gap-4 rounded-xl border border-brand-border bg-neutral-50/40 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8`}
-        >
-          <div>
-            <h2 className="text-xl font-bold text-neutral-900">Ready to pamper your pets?</h2>
-            <p className="mt-2 text-sm text-neutral-600">
-              Explore our curated collections of pet essentials.
-            </p>
-          </div>
-          <div className="shrink-0">
-            <Link
-              href="/products"
-              className="inline-flex items-center justify-center rounded-lg bg-brand-accent px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-accent-hover"
-            >
-              Shop Now
-            </Link>
+            <div className="bg-[#f6f3ee] p-6 lg:p-7">
+              <h2 className="text-4xl font-semibold tracking-tight text-[#1f1a16]">Membership (Club Subscription)</h2>
+              <div className="mt-4 rounded-2xl border border-[#bfa774] bg-[#fbf7ef] p-4 shadow-sm">
+                <p className="text-sm font-semibold text-[#1f1a16]">
+                  Unlock exclusive discounts, grooming vouchers, and priority support.
+                </p>
+                <Link
+                  href="/products"
+                  className="mt-4 inline-flex w-full items-center justify-center rounded-xl bg-[#c88b3c] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#b57a2e]"
+                >
+                  JOIN THE CLUB →
+                </Link>
+              </div>
+            </div>
           </div>
         </div>
       </div>

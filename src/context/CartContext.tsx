@@ -10,6 +10,7 @@ interface CartContextType {
   addToCart: (product: Product, quantity?: number) => Promise<boolean>;
   removeFromCart: (productId: string) => void;
   updateQuantity: (productId: string, quantity: number) => void;
+  flushPendingQuantities: () => Promise<void>;
   cartCount: number;
   clearCart: () => void;
   flyoutOpen: boolean;
@@ -39,13 +40,6 @@ type ServerCartResponse = {
   item_count?: number;
   subtotal?: number;
   items?: ServerCartItem[];
-};
-type CartItemPatchResponse = {
-  item?: {
-    id?: string | number;
-    quantity?: number;
-  };
-  totals?: { subtotal?: number; grand_total?: number };
   error?: string;
 };
 
@@ -152,6 +146,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const qtySuccessTimerRef = useRef<Record<string, number>>({});
   const flyoutContainerRef = useRef<HTMLDivElement | null>(null);
   const lastFocusedElementRef = useRef<HTMLElement | null>(null);
+  const pendingQtyByIdRef = useRef<Record<string, number>>({});
 
   const refreshFromServer = useCallback(async () => {
     const debugLabel = `[cart][context] GET /api/cart`;
@@ -229,10 +224,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const addToCart = useCallback(async (product: Product, quantity = 1): Promise<boolean> => {
-    const beforeItems = items;
     const requestedQty = Math.max(1, Math.floor(Number(quantity)));
     if (!Number.isFinite(requestedQty) || requestedQty <= 0) return false;
-    const token = readToken();
     const id = String(product.id);
     const normalized = { ...product, id };
     const existing = items.find((i) => String(i.id) === id);
@@ -276,47 +269,44 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     })();
     persistCartSnapshot(optimisticItems);
 
-    setFlyoutOpen(true);
-
+    // Persist to account cart immediately when authenticated so cart survives logout/login.
+    const token = readToken();
     if (token) {
-      void (async () => {
-        try {
-          const res = await requestCartApi("/api/cart/items", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              productId: id,
-              quantity: requestedQty,
-            }),
-          });
-          const data = (await res.json().catch(() => ({}))) as ServerCartResponse & { error?: string };
-          if (!res.ok) {
-            startTransition(() => {
-              setItems(beforeItems);
-            });
-            persistCartSnapshot(beforeItems);
-            return;
-          }
-          if (Array.isArray(data.items)) {
-            const nextItems = mapServerItemsToCartItems(data.items ?? []);
-            startTransition(() => {
-              setItems(nextItems);
-            });
-            persistCartSnapshot(nextItems);
-            return;
-          }
-        } catch {
+      try {
+        const res = await requestCartApi("/api/cart/items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ productId: id, quantity: requestedQty }),
+        });
+
+        if (!res.ok) {
+          // Revert optimistic change when authenticated sync fails.
           startTransition(() => {
-            setItems(beforeItems);
+            setItems(items);
           });
-          persistCartSnapshot(beforeItems);
+          persistCartSnapshot(items);
+          return false;
         }
-      })();
-      return true;
+
+        const data = (await res.json().catch(() => ({}))) as ServerCartResponse;
+        if (Array.isArray(data.items)) {
+          const serverItems = mapServerItemsToCartItems(data.items);
+          startTransition(() => {
+            setItems(serverItems);
+          });
+          persistCartSnapshot(serverItems);
+        }
+      } catch {
+        // Revert optimistic change when authenticated sync fails.
+        startTransition(() => {
+          setItems(items);
+        });
+        persistCartSnapshot(items);
+        return false;
+      }
     }
 
+    setFlyoutOpen(true);
     return true;
   }, [items]);
 
@@ -383,8 +373,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     })();
   }, [items]);
 
+  // UI-first quantity updates:
+  // - Update local cart + snapshot immediately (fast UX)
+  // - Defer server updates until checkout via `flushPendingQuantities`
   const updateQuantity = useCallback((productId: string, quantity: number) => {
-    const beforeItems = items;
     const id = String(productId);
     const requestedQty = Math.max(0, Math.floor(Number(quantity)));
     const targetItem = items.find((i) => String(i.id) === id);
@@ -394,7 +386,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         ? 0
         : (stockLimit !== undefined ? Math.min(requestedQty, stockLimit) : requestedQty);
     const isIncreaseAction = cappedQty > (targetItem?.quantity ?? 0);
-    const reqLabel = `[cart][qty] id=${id} from=${targetItem?.quantity ?? "n/a"} to=${cappedQty}`;
 
     let optimisticItems: CartItem[] = [];
     setItems((prev) => {
@@ -425,6 +416,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       return optimisticItems;
     });
     persistCartSnapshot(optimisticItems);
+    if (cappedQty <= 0) {
+      delete pendingQtyByIdRef.current[id];
+    } else {
+      pendingQtyByIdRef.current[id] = cappedQty;
+    }
     const startedAt = Date.now();
     setQtyActionPendingById((prev) => ({ ...prev, [id]: true }));
     if (!isIncreaseAction) {
@@ -432,78 +428,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         setQtyLoadingVisibleById((prev) => ({ ...prev, [id]: true }));
       }, QTY_LOADING_DELAY_MS);
     }
-
-    void (async () => {
-      try {
-        if (process.env.NODE_ENV !== "production") {
-          console.time(reqLabel);
-          console.log(`${reqLabel} start`, { requestedQty, cappedQty, isIncreaseAction });
-        }
-        const res =
-          cappedQty <= 0
-            ? await requestCartApi(`/api/cart/items/${encodeURIComponent(id)}`, {
-                method: "DELETE",
-              })
-            : await requestCartApi(`/api/cart/items/${encodeURIComponent(id)}`, {
-                method: "PATCH",
-                headers: {
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                  quantity: cappedQty,
-                }),
-              });
-        const data = (await res.json().catch(() => ({}))) as
-          | (ServerCartResponse & { error?: string })
-          | CartItemPatchResponse;
-        if (process.env.NODE_ENV !== "production") {
-          console.log(`${reqLabel} response`, {
-            ok: res.ok,
-            status: res.status,
-            itemCount: "items" in data && Array.isArray(data.items) ? data.items.length : null,
-            hasItem: "item" in data ? Boolean(data.item) : null,
-            totals: "totals" in data ? data.totals ?? null : null,
-            error: ("error" in data ? data.error : null) ?? null,
-          });
-        }
-        if (res.ok) {
-          const patchedQty =
-            cappedQty > 0 && "item" in data && data.item
-              ? Math.max(1, Math.floor(Number(data.item.quantity ?? cappedQty)))
-              : cappedQty;
-          if (cappedQty > 0) {
-            setItems((prev) => {
-              const next = prev.map((row) => {
-                if (String(row.id) !== id) return row;
-                return {
-                  ...row,
-                  quantity: patchedQty,
-                };
-              });
-              persistCartSnapshot(next);
-              return next;
-            });
-          }
-          return;
-        }
-        startTransition(() => {
-          setItems(beforeItems);
-        });
-        persistCartSnapshot(beforeItems);
-      } catch {
-        if (process.env.NODE_ENV !== "production") {
-          console.log(`${reqLabel} network/error`);
-        }
-        startTransition(() => {
-          setItems(beforeItems);
-        });
-        persistCartSnapshot(beforeItems);
-      } finally {
-        if (process.env.NODE_ENV !== "production") {
-          console.timeEnd(reqLabel);
-        }
-      }
-    })().finally(() => {
+    // Keep existing micro-interaction timing (buttons briefly "locked").
+    window.setTimeout(() => {
       const loadingTimer = qtyLoadingTimerRef.current[id];
       if (loadingTimer) {
         window.clearTimeout(loadingTimer);
@@ -525,8 +451,37 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           return next;
         });
       }, remaining);
-    });
+    }, 0);
   }, [items]);
+
+  const flushPendingQuantities = useCallback(async () => {
+    const pending = { ...pendingQtyByIdRef.current };
+    const ids = Object.keys(pending);
+    if (ids.length === 0) return;
+
+    await Promise.all(
+      ids.map(async (id) => {
+        const qty = pending[id];
+        try {
+          const res =
+            qty <= 0
+              ? await requestCartApi(`/api/cart/items/${encodeURIComponent(id)}`, { method: "DELETE" })
+              : await requestCartApi(`/api/cart/items/${encodeURIComponent(id)}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ quantity: qty }),
+                });
+          if (!res.ok) return;
+          delete pendingQtyByIdRef.current[id];
+        } catch {
+          // Keep pending; we'll retry on next checkout.
+        }
+      })
+    );
+
+    // Reconcile totals/items from server after flushing.
+    await refreshFromServer();
+  }, [refreshFromServer]);
 
   const cartCount = items.reduce((sum, i) => sum + i.quantity, 0);
   const clearCart = useCallback(() => {
@@ -542,6 +497,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         addToCart,
         removeFromCart,
         updateQuantity,
+        flushPendingQuantities,
         cartCount,
         clearCart,
         flyoutOpen,

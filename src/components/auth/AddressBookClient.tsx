@@ -415,21 +415,23 @@ export default function AddressBookClient({
   }
 
   return (
-    <div className="overflow-hidden rounded-3xl border border-zinc-200/90 bg-white shadow-[0_12px_40px_rgba(15,23,42,0.06)]">
-      <div className="border-b border-zinc-100 px-6 py-7 sm:px-10">
+    <div className="overflow-hidden rounded-3xl border border-[#d9d1c5] bg-[#f7f4ef] shadow-[0_12px_40px_rgba(70,56,42,0.08)]">
+      <div className="relative border-b border-[#ddd3c5] px-6 py-7 sm:px-10">
+        <div className="pointer-events-none absolute inset-0 opacity-20">
+          <img src="/HomePage.png" alt="" className="h-full w-full object-cover" />
+        </div>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div className="min-w-0">
-            <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-zinc-500">Address Book</p>
-            <h1 className="mt-2 text-2xl font-semibold tracking-tight text-zinc-900 sm:text-3xl">Manage saved addresses</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-600">
+          <div className="relative min-w-0">
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-zinc-900 sm:text-5xl">Manage Saved Addresses</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-700">
               Keep delivery and billing details up to date for faster checkout.
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="relative flex flex-wrap items-center gap-3">
             <button
               type="button"
               onClick={() => router.push("/profile")}
-              className="text-sm font-medium text-zinc-600 transition hover:text-zinc-900"
+              className="text-sm font-medium text-zinc-700 transition hover:text-zinc-900"
             >
               Back to profile
             </button>
@@ -440,7 +442,7 @@ export default function AddressBookClient({
                 setAddressEditorMode("add");
               }}
               disabled={saving}
-              className="inline-flex min-h-[40px] items-center justify-center rounded-xl bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex min-h-[44px] items-center justify-center rounded-xl bg-[#b9823d] px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#a87534] disabled:cursor-not-allowed disabled:opacity-60"
             >
               Add new address
             </button>
@@ -449,8 +451,8 @@ export default function AddressBookClient({
       </div>
 
       <div className="px-6 py-7 sm:px-10 sm:py-8">
-        <div className="mb-5 flex items-center justify-between rounded-2xl border border-zinc-200 bg-zinc-50/70 px-4 py-3">
-          <p className="text-sm font-medium text-zinc-700">
+        <div className="mb-5 flex items-center justify-between rounded-2xl border border-[#d6cec2] bg-[#f8f5f1] px-4 py-3">
+          <p className="text-3sm font-medium text-zinc-800">
             {normalizedAddresses.length > 0
               ? `${normalizedAddresses.length} saved ${normalizedAddresses.length === 1 ? "address" : "addresses"}`
               : "No saved addresses"}
@@ -474,10 +476,7 @@ export default function AddressBookClient({
                 .join(", ");
 
               return (
-                <article
-                  key={address.id}
-                  className="group rounded-2xl border border-zinc-200 bg-white p-6 transition duration-200 hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-[0_10px_28px_rgba(15,23,42,0.08)]"
-                >
+                <article key={address.id} className="group rounded-2xl border border-zinc-400 bg-white p-6 transition duration-200 hover:shadow-sm">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-base font-semibold text-zinc-900 transition-colors group-hover:text-zinc-950">
@@ -485,12 +484,12 @@ export default function AddressBookClient({
                       </p>
                       <div className="mt-2 flex flex-wrap gap-2">
                         {isDefaultShipping ? (
-                          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-0.5 text-[11px] font-medium text-zinc-700">
+                          <span className="rounded-full border border-[#b5b79c] bg-[#a0ab86] px-2.5 py-0.5 text-[11px] font-medium text-white">
                             Default shipping
                           </span>
                         ) : null}
                         {isDefaultBilling ? (
-                          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-0.5 text-[11px] font-medium text-zinc-700">
+                          <span className="rounded-full border border-[#c6bb9e] bg-[#b5a783] px-2.5 py-0.5 text-[11px] font-medium text-white">
                             Default billing
                           </span>
                         ) : null}
@@ -568,9 +567,17 @@ export default function AddressBookClient({
                         setOpenMenuId(null);
                       }}
                       disabled={actionsDisabled}
-                      className="inline-flex min-h-[36px] items-center justify-center rounded-lg border border-zinc-300 bg-white px-3.5 py-1.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100 hover:text-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex min-h-[36px] items-center justify-center rounded-full border border-[#b39458] bg-white px-5 py-1.5 text-sm font-medium text-[#8b6a2f] transition hover:bg-[#fbf6ea] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void onDeleteAddress(address.id)}
+                      disabled={actionsDisabled}
+                      className="ml-2 inline-flex min-h-[36px] items-center justify-center rounded-full border border-zinc-300 bg-[#fafafa] px-5 py-1.5 text-sm font-medium text-[#9b4d4d] transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Delete
                     </button>
                   </div>
                 </article>
@@ -741,7 +748,7 @@ export default function AddressBookClient({
         ) : null}
 
         {success ? (
-          <p className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          <p className="mt-6 rounded-2xl border border-[#d7cdbf] bg-[#f4f0e9] px-4 py-3 text-sm text-zinc-900">
             {success}
           </p>
         ) : null}

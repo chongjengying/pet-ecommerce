@@ -169,6 +169,11 @@ function isMissingColumn(error: unknown, column: string): boolean {
   );
 }
 
+function isUpdatedAtTriggerMismatch(error: unknown): boolean {
+  const message = String((error as { message?: string })?.message ?? "").toLowerCase();
+  return message.includes("record \"new\" has no field \"updated_at\"");
+}
+
 function buildAddressWritePayload(input: {
   label: string;
   recipientName: string | null;
@@ -331,8 +336,13 @@ export async function PUT(request: Request) {
 
   if (Object.keys(userUpdatePayload).length > 0) {
     const { error: userError } = await supabase.from("users").update(userUpdatePayload).eq("id", userIdKey);
-    if (userError) {
+    if (userError && !isUpdatedAtTriggerMismatch(userError)) {
       return NextResponse.json({ error: userError.message || "Could not update user profile." }, { status: 400 });
+    }
+    if (userError && isUpdatedAtTriggerMismatch(userError)) {
+      console.warn("[api/profile][PUT] Ignoring users update due to legacy updated_at trigger mismatch:", {
+        message: userError.message,
+      });
     }
   }
 
@@ -372,6 +382,11 @@ export async function PUT(request: Request) {
   if (profileUpsertError) {
     if (isMissingProfilesTable(profileUpsertError)) {
       profilesTableMissing = true;
+    } else if (isUpdatedAtTriggerMismatch(profileUpsertError)) {
+      profilesTableMissing = true;
+      console.warn("[api/profile][PUT] Ignoring profiles upsert due to legacy updated_at trigger mismatch:", {
+        message: profileUpsertError.message,
+      });
     } else {
       return NextResponse.json({ error: profileUpsertError.message || "Could not update profile details." }, { status: 400 });
     }
@@ -390,11 +405,21 @@ export async function PUT(request: Request) {
       postal_code: addrPostal!,
       country: addrCountry!,
     });
-    if (addrResult.error && !isMissingUserAddressesTable(addrResult.error)) {
+    if (
+      addrResult.error &&
+      !isMissingUserAddressesTable(addrResult.error) &&
+      !isUpdatedAtTriggerMismatch(addrResult.error)
+    ) {
       return NextResponse.json(
         { error: addrResult.error.message || "Could not save address." },
         { status: 400 }
       );
+    }
+    if (addrResult.error && isUpdatedAtTriggerMismatch(addrResult.error)) {
+      console.warn("[api/profile][PUT] Ignoring address save due to legacy updated_at trigger mismatch:", {
+        table: addressesTable(),
+        message: addrResult.error.message,
+      });
     }
   }
 

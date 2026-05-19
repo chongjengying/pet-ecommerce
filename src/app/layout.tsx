@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { DM_Sans } from "next/font/google";
 import "./globals.css";
 import { CartProvider } from "@/context/CartContext";
+import { AuthProvider } from "@/components/AuthContext";
 import AppChrome from "@/components/AppChrome";
 
 const dmSans = DM_Sans({
@@ -23,9 +24,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${dmSans.variable} font-sans antialiased`}>
-        <CartProvider>
-          <AppChrome>{children}</AppChrome>
-        </CartProvider>
+        <AuthProvider>
+          <CartProvider>
+            <AppChrome>{children}</AppChrome>
+          </CartProvider>
+        </AuthProvider>
       </body>
     </html>
   );

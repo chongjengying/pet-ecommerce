@@ -100,30 +100,38 @@ export default function CustomerLoginForm() {
   };
 
   return (
-    <section className="mx-auto w-full max-w-md rounded-3xl border border-amber-200/70 bg-white/90 p-7 shadow-[0_18px_55px_rgba(44,36,32,0.08)] backdrop-blur">
-      <div className="mb-6">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sage">Pawluxe Customer</p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight text-umber">Welcome back</h1>
-        <p className="mt-2 text-sm text-umber/70">Sign in to track orders, save favorites, and check out faster.</p>
+    <section className="mx-auto w-full max-w-md">
+      <div className="mb-8 border-b border-stone-200">
+        <div className="flex items-center gap-8">
+          <p className="border-b-2 border-sage pb-3 text-lg font-semibold tracking-tight text-umber">Login</p>
+          <Link href="/auth/signup" className="pb-3 text-lg font-medium text-umber/65 transition hover:text-umber">
+            Sign Up
+          </Link>
+        </div>
+      </div>
+
+      <div className="mb-7">
+        <h2 className="text-3xl font-semibold tracking-tight text-umber">Welcome back</h2>
+        <p className="mt-2 text-sm text-umber/70">Use your email, username, or phone to sign in.</p>
       </div>
 
       <form onSubmit={onSubmit} className="space-y-4">
         <label className="block space-y-1.5">
-          <span className="text-sm font-medium text-umber/85">Username or Email</span>
+          <span className="text-sm font-medium text-umber/90">Email Address / Username / Phone</span>
           <input
             type="text"
             autoComplete="username"
             value={identifier}
             onChange={(event) => setIdentifier(event.target.value)}
-            placeholder="janedoe or you@example.com"
-            className="w-full rounded-2xl border border-amber-200/80 bg-cream px-3.5 py-3 text-sm text-umber outline-none transition focus:border-sage focus:bg-white"
+            placeholder="you@example.com or janedoe"
+            className="w-full rounded-xl border border-stone-300 bg-white px-3.5 py-3 text-sm text-umber outline-none transition focus:border-sage"
             required
           />
         </label>
 
         <label className="block space-y-1.5">
-          <span className="text-sm font-medium text-umber/85">Password</span>
-          <div className="flex items-center rounded-2xl border border-amber-200/80 bg-cream px-3 focus-within:border-sage focus-within:bg-white">
+          <span className="text-sm font-medium text-umber/90">Password</span>
+          <div className="flex items-center rounded-xl border border-stone-300 bg-white px-3 focus-within:border-sage">
             <input
               type={showPassword ? "text" : "password"}
               autoComplete="current-password"
@@ -136,7 +144,7 @@ export default function CustomerLoginForm() {
             <button
               type="button"
               onClick={() => setShowPassword((prev) => !prev)}
-              className="ml-2 rounded-lg px-2 py-1 text-xs font-medium text-umber/70 hover:bg-amber-100"
+              className="ml-2 rounded-lg px-2 py-1 text-xs font-medium text-umber/70 hover:bg-stone-100"
             >
               {showPassword ? "Hide" : "Show"}
             </button>
@@ -150,16 +158,21 @@ export default function CustomerLoginForm() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full rounded-2xl bg-umber px-4 py-3 text-sm font-semibold text-white transition hover:bg-umber/90 disabled:cursor-not-allowed disabled:opacity-60"
+          className="mt-2 w-full rounded-xl bg-[#18b4ad] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#139f98] disabled:cursor-not-allowed disabled:opacity-60"
         >
           {loading ? "Signing in..." : "Sign in"}
         </button>
       </form>
 
-      <p className="mt-5 text-center text-sm text-umber/70">
+      <p className="mt-8 text-center text-sm text-umber/70">
         New customer?{" "}
-        <Link href="/auth/signup" className="font-semibold text-terracotta hover:underline">
+        <Link href="/auth/signup" className="font-semibold text-[#1973e8] hover:underline">
           Create account
+        </Link>
+      </p>
+      <p className="mt-3 text-center text-sm">
+        <Link href="/auth/forgot-password" className="font-medium text-[#1973e8] hover:underline">
+          Forgot your password?
         </Link>
       </p>
     </section>

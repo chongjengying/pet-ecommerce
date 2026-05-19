@@ -14,6 +14,7 @@ import { createOrder } from "@/services/orderService";
 import { createPayment } from "@/services/paymentService";
 import { sendCheckoutEmailNotification } from "@/lib/emailNotifications";
 import { readEmailVerificationStatus } from "@/lib/emailVerification";
+import { VoucherService } from "@/services/voucherService";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -31,6 +32,7 @@ type CheckoutAddressPayload = {
 };
 
 type CheckoutPaymentMethod = "adaptis_gateway" | "grab" | "bank_transfer";
+type CheckoutDeliveryMethod = "west_my_standard" | "pickup_store" | "pickup_express";
 const FREE_SHIPPING_THRESHOLD = 150;
 const FLAT_SHIPPING_FEE = 12;
 const TAX_RATE = 0;
@@ -62,8 +64,13 @@ function buildCheckoutReference(orderNumber: string | null, orderId: string | nu
   return `PAY-${base || "ORDER"}-${stamp}`;
 }
 
-function calculateCheckoutPricing(subtotal: number) {
-  const shippingFee = subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : FLAT_SHIPPING_FEE;
+function calculateCheckoutPricing(subtotal: number, deliveryMethod: CheckoutDeliveryMethod) {
+  const shippingFeeByMethod: Record<CheckoutDeliveryMethod, number> = {
+    west_my_standard: 7,
+    pickup_store: 0,
+    pickup_express: 0,
+  };
+  const shippingFee = shippingFeeByMethod[deliveryMethod] ?? FLAT_SHIPPING_FEE;
   const taxAmount = Number((subtotal * TAX_RATE).toFixed(2));
   const totalAmount = Number((subtotal + shippingFee + taxAmount).toFixed(2));
   return { shippingFee, taxAmount, totalAmount };
@@ -167,7 +174,9 @@ export async function POST(request: Request) {
   const shippingAddress = ((body as { shipping_address?: unknown })?.shipping_address ?? null) as CheckoutAddressPayload | null;
   const billingAddress = ((body as { billing_address?: unknown })?.billing_address ?? null) as CheckoutAddressPayload | null;
   const billingSameAsShipping = Boolean((body as { billing_same_as_shipping?: unknown })?.billing_same_as_shipping ?? true);
+  const voucherCode = String((body as { voucher_code?: unknown })?.voucher_code ?? "").trim();
   const paymentMethod = String((body as { payment_method?: unknown })?.payment_method ?? "adaptis_gateway").trim() as CheckoutPaymentMethod;
+  const deliveryMethod = String((body as { delivery_method?: unknown })?.delivery_method ?? "west_my_standard").trim() as CheckoutDeliveryMethod;
   const cartViewResult = await getCartView(supabase, userIdForDbQuery(resolvedUser.id));
   if (cartViewResult.error || !cartViewResult.data) {
     return NextResponse.json(
@@ -255,7 +264,26 @@ export async function POST(request: Request) {
     (sum, item) => sum + (Number(item.price) || 0) * (item.quantity || 0),
     0
   );
-  const { shippingFee, taxAmount, totalAmount } = calculateCheckoutPricing(subtotal);
+  const { shippingFee, taxAmount } = calculateCheckoutPricing(subtotal, deliveryMethod);
+  let voucherId: string | null = null;
+  let voucherDiscountAmount = 0;
+  if (voucherCode) {
+    const voucherResult = await VoucherService.validateVoucher({
+      code: voucherCode,
+      userId: String(resolvedUser.id),
+      pricing: { subtotal, shipping: shippingFee, tax: taxAmount },
+      paymentMethod,
+    });
+    if ("error" in voucherResult) {
+      return NextResponse.json(
+        { error: voucherResult.error.message, error_code: voucherResult.error.code },
+        { status: 400 }
+      );
+    }
+    voucherId = voucherResult.voucher.id;
+    voucherDiscountAmount = voucherResult.discount;
+  }
+  const totalAmount = Math.max(0, Number((subtotal + shippingFee + taxAmount - voucherDiscountAmount).toFixed(2)));
 
   const shippingAddressLine1 = cleanText(shippingAddress?.address_line1) ?? shipTo.address_line1;
   const shippingAddressLine2 = cleanText(shippingAddress?.address_line2) ?? shipTo.address_line2;
@@ -288,9 +316,12 @@ export async function POST(request: Request) {
       shipping_fee: shippingFee,
       tax_amount: taxAmount,
       discount: 0,
+      voucher_id: voucherId ? Number(voucherId) : undefined,
+      voucher_code: voucherCode || undefined,
+      voucher_discount_amount: voucherDiscountAmount,
       currency: "MYR",
       payment_status: paymentStatus,
-      shipping_method: shippingFee === 0 ? "free_shipping" : "standard_shipping",
+      shipping_method: deliveryMethod,
       tracking_number: null,
       shipping_name: shippingRecipientName,
       shipping_phone: shippingPhone,
@@ -424,6 +455,18 @@ export async function POST(request: Request) {
       error: orderAddressErr instanceof Error ? orderAddressErr.message : String(orderAddressErr),
     });
   }
+  if (voucherId && createdOrder?.id) {
+    await supabase.from("voucher_redemptions").insert({
+      voucher_id: Number(voucherId),
+      voucher_code: voucherCode,
+      user_id: resolvedUser.id,
+      order_id: createdOrder.id,
+      discount_amount: voucherDiscountAmount,
+      status: "used",
+      used_at: new Date().toISOString(),
+    });
+    await supabase.rpc("increment_voucher_used_count", { p_voucher_id: Number(voucherId) });
+  }
 
   // 2) Then deduct inventory
   try {
@@ -529,6 +572,8 @@ export async function POST(request: Request) {
       subtotal,
       shipping_fee: shippingFee,
       tax_amount: taxAmount,
+      voucher_code: voucherCode || null,
+      voucher_discount_amount: voucherDiscountAmount,
       total_amount: totalAmount,
       currency: "MYR",
       shipping: {

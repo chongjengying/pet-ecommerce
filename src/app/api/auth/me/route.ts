@@ -61,7 +61,7 @@ async function loadUserFast(
       return null;
     }
     if (!data) return null;
-    const row = data as Record<string, unknown>;
+    const row = data as unknown as Record<string, unknown>;
     const first = typeof row.first_name === "string" ? row.first_name.trim() : "";
     const last = typeof row.last_name === "string" ? row.last_name.trim() : "";
     const full = typeof row.full_name === "string" ? row.full_name.trim() : "";

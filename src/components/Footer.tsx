@@ -1,14 +1,11 @@
 import Link from "next/link";
 
-/**
- * Edit this object to change footer links and labels — no layout changes needed.
- * Keep section titles short; use sentence case for link labels.
- */
 export const footerConfig = {
   brand: {
     name: "PAWLUXE",
     tagline: "Premium Pet Store",
-    description: "Thoughtful products and grooming for pets who share your home.",
+    description:
+      "Elevated pet essentials, grooming, and lifestyle products curated for modern pet families.",
   },
   columns: [
     {
@@ -40,16 +37,8 @@ export const footerConfig = {
     { href: "/contact", label: "Help & support" },
   ],
   social: [
-    {
-      href: "https://instagram.com",
-      label: "Instagram",
-      icon: "instagram",
-    },
-    {
-      href: "https://tiktok.com",
-      label: "TikTok",
-      icon: "tiktok",
-    },
+    { href: "https://instagram.com", label: "Instagram", icon: "instagram" },
+    { href: "https://tiktok.com", label: "TikTok", icon: "tiktok" },
   ],
 } as const;
 
@@ -61,6 +50,7 @@ function SocialIcon({ name }: { name: "instagram" | "tiktok" }) {
       </svg>
     );
   }
+
   return (
     <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.38V2h-3.2v13.26a2.89 2.89 0 1 1-2-2.75V9.25a6.11 6.11 0 1 0 5.2 6V8.53a8.16 8.16 0 0 0 4.77 1.54V6.9c-.34 0-.67-.07-1-.21z" />
@@ -72,65 +62,98 @@ export default function Footer() {
   const year = new Date().getFullYear();
 
   return (
-    <footer className="border-t border-amber-200/80 bg-gradient-to-b from-cream via-cream to-amber-100/35">
-      <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 lg:py-14">
-        <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-12 lg:gap-8">
-          {/* Brand — wider column on large screens */}
-          <div className="lg:col-span-4">
-            <p className="text-lg font-bold tracking-[0.12em] text-umber">{footerConfig.brand.name}</p>
-            <p className="mt-1 text-sm font-medium text-sage">{footerConfig.brand.tagline}</p>
-            <p className="mt-3 max-w-sm text-sm leading-relaxed text-umber/65">{footerConfig.brand.description}</p>
-            <div className="mt-5 flex items-center gap-2">
-              {footerConfig.social.map((item) => (
-                <a
-                  key={item.label}
-                  href={item.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label={item.label}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-amber-300/60 bg-white/60 text-umber/75 shadow-sm transition hover:border-sage/50 hover:bg-white hover:text-umber"
+    <footer className="relative overflow-hidden border-t border-black/5 bg-[#fbf7ef]">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(196,143,83,0.18),transparent_35%),radial-gradient(circle_at_bottom_right,rgba(118,143,99,0.16),transparent_32%)]" />
+
+      <div className="relative mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:py-16">
+        <div className="rounded-[2rem] border border-white/70 bg-white/60 p-6 shadow-2xl shadow-[#7b5b2e]/10 backdrop-blur-xl sm:p-8 lg:p-10">
+          <div className="grid gap-10 lg:grid-cols-12">
+            <div className="lg:col-span-5">
+              <p className="text-3xl font-black tracking-[-0.05em] text-[#211811] sm:text-4xl">
+                {footerConfig.brand.name}
+              </p>
+
+              <p className="mt-2 text-xs font-bold uppercase tracking-[0.24em] text-[#9b6b38]">
+                {footerConfig.brand.tagline}
+              </p>
+
+              <p className="mt-5 max-w-md text-sm leading-7 text-[#6f6253]">
+                {footerConfig.brand.description}
+              </p>
+
+              <div className="mt-6 flex flex-wrap gap-3">
+                <Link
+                  href="/products"
+                  className="rounded-full bg-[#211811] px-5 py-3 text-xs font-bold uppercase tracking-[0.16em] text-white transition hover:-translate-y-0.5 hover:bg-[#3a2a1e]"
                 >
-                  <SocialIcon name={item.icon} />
-                </a>
+                  Shop now
+                </Link>
+
+                <Link
+                  href="/contact"
+                  className="rounded-full border border-[#d6c3a6] bg-white/70 px-5 py-3 text-xs font-bold uppercase tracking-[0.16em] text-[#211811] transition hover:-translate-y-0.5 hover:bg-white"
+                >
+                  Support
+                </Link>
+              </div>
+
+              <div className="mt-7 flex items-center gap-2">
+                {footerConfig.social.map((item) => (
+                  <a
+                    key={item.label}
+                    href={item.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={item.label}
+                    className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-black/10 bg-white text-[#211811] shadow-sm transition hover:-translate-y-0.5 hover:border-[#211811] hover:bg-[#211811] hover:text-white"
+                  >
+                    <SocialIcon name={item.icon} />
+                  </a>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid gap-8 sm:grid-cols-3 lg:col-span-7">
+              {footerConfig.columns.map((column) => (
+                <div key={column.title}>
+                  <h2 className="text-xs font-black uppercase tracking-[0.22em] text-[#9b6b38]">
+                    {column.title}
+                  </h2>
+
+                  <ul className="mt-5 space-y-3">
+                    {column.links.map((link) => (
+                      <li key={link.href}>
+                        <Link
+                          href={link.href}
+                          className="text-sm font-medium text-[#6f6253] transition hover:text-[#211811] hover:underline hover:underline-offset-4"
+                        >
+                          {link.label}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               ))}
             </div>
           </div>
 
-          {footerConfig.columns.map((column) => (
-            <div key={column.title} className="lg:col-span-2">
-              <h2 className="text-[11px] font-semibold uppercase tracking-[0.2em] text-umber/45">{column.title}</h2>
-              <ul className="mt-4 space-y-2.5">
-                {column.links.map((link) => (
-                  <li key={link.href}>
-                    <Link
-                      href={link.href}
-                      className="text-sm text-umber/75 transition hover:text-sage focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sage/60"
-                    >
-                      {link.label}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
+          <div className="mt-10 flex flex-col gap-4 border-t border-black/5 pt-6 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs font-medium text-[#7b6d5d]">
+              © {year} {footerConfig.brand.name}. All rights reserved.
+            </p>
 
-        {/* Bottom bar */}
-        <div className="mt-12 flex flex-col gap-4 border-t border-amber-200/70 pt-8 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-xs text-umber/50">
-            © {year} {footerConfig.brand.name}. All rights reserved.
-          </p>
-          <nav aria-label="Legal and help" className="flex flex-wrap gap-x-6 gap-y-2 text-xs">
-            {footerConfig.legal.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className="text-umber/60 underline-offset-4 transition hover:text-umber hover:underline"
-              >
-                {link.label}
-              </Link>
-            ))}
-          </nav>
+            <nav className="flex flex-wrap gap-x-6 gap-y-2 text-xs font-semibold">
+              {footerConfig.legal.map((link) => (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className="text-[#7b6d5d] transition hover:text-[#211811] hover:underline hover:underline-offset-4"
+                >
+                  {link.label}
+                </Link>
+              ))}
+            </nav>
+          </div>
         </div>
       </div>
     </footer>

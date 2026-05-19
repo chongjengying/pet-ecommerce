@@ -4,10 +4,22 @@ import { getEmailFrom, getResendClient } from "@/lib/resend";
 
 const EMAIL_VERIFICATION_TTL_MS = 1000 * 60 * 60 * 24; // 24 hours
 
-type DbError = { message?: string } | null;
+type SupabaseErrorLike = { message?: string } | null;
+
+type SupabaseSelectResult = { data: unknown; error: SupabaseErrorLike };
+type SupabaseWriteResult = { error: SupabaseErrorLike };
 
 type SupabaseLike = {
-  from: (table: string) => any;
+  from: (table: string) => {
+    select: (columns: string) => {
+      eq: (column: string, value: unknown) => {
+        maybeSingle: () => PromiseLike<SupabaseSelectResult>;
+      };
+    };
+    update: (payload: Record<string, unknown>) => {
+      eq: (column: string, value: unknown) => PromiseLike<SupabaseWriteResult>;
+    };
+  };
 };
 
 type VerificationStatusResult = {
@@ -129,9 +141,10 @@ function readParsedVerificationStatus(parsed: Record<string, unknown>, columns: 
 }
 
 export async function readEmailVerificationStatus(
-  supabase: SupabaseLike,
+  supabase: unknown,
   userId: string | number
 ): Promise<VerificationStatusResult> {
+  const client = supabase as SupabaseLike;
   const idKey = userIdForDbQuery(userId);
   let sawMissingColumn = false;
 
@@ -144,7 +157,7 @@ export async function readEmailVerificationStatus(
       selectColumns.push(columns.verifiedBoolKey);
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await client
       .from("users")
       .select(selectColumns.join(","))
       .eq("id", idKey)
@@ -198,10 +211,11 @@ export async function readEmailVerificationStatus(
 }
 
 export async function issueEmailVerificationToken(
-  supabase: SupabaseLike,
+  supabase: unknown,
   userId: string | number,
   options: { markUnverified?: boolean } = {}
 ): Promise<IssueVerificationResult> {
+  const client = supabase as SupabaseLike;
   const idKey = userIdForDbQuery(userId);
   const rawToken = randomBytes(32).toString("hex");
   const tokenHash = hashToken(rawToken);
@@ -226,7 +240,7 @@ export async function issueEmailVerificationToken(
       }
     }
 
-    const { error } = await supabase.from("users").update(payload).eq("id", idKey);
+    const { error } = await client.from("users").update(payload).eq("id", idKey);
     if (!error) {
       return {
         token: rawToken,
@@ -261,10 +275,11 @@ export async function issueEmailVerificationToken(
 }
 
 async function clearVerificationToken(
-  supabase: SupabaseLike,
+  supabase: unknown,
   userId: string | number,
   preferredColumns?: VerificationColumnSet
 ): Promise<void> {
+  const client = supabase as SupabaseLike;
   const idKey = userIdForDbQuery(userId);
   const attempts = preferredColumns
     ? [preferredColumns, ...VERIFICATION_COLUMN_SETS.filter((set) => set !== preferredColumns)]
@@ -275,16 +290,17 @@ async function clearVerificationToken(
       [columns.tokenHashKey]: null,
       [columns.expiresAtKey]: null,
     };
-    const { error } = await supabase.from("users").update(payload).eq("id", idKey);
+    const { error } = await client.from("users").update(payload).eq("id", idKey);
     if (!error || !isMissingColumnError(error)) return;
   }
 }
 
 export async function verifyEmailByToken(
-  supabase: SupabaseLike,
+  supabase: unknown,
   token: string,
   options: { email?: string | null } = {}
 ): Promise<VerifyTokenResult> {
+  const client = supabase as SupabaseLike;
   const trimmedToken = token.trim();
   if (!trimmedToken || trimmedToken.length < 16) {
     return { ok: false, alreadyVerified: false, error: "Invalid verification token.", code: "INVALID_OR_EXPIRED_TOKEN" };
@@ -304,7 +320,7 @@ export async function verifyEmailByToken(
       selectColumns.push(columns.verifiedBoolKey);
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await client
       .from("users")
       .select(selectColumns.join(","))
       .eq(columns.tokenHashKey, tokenHash)
@@ -381,7 +397,7 @@ export async function verifyEmailByToken(
       updatePayload[columns.verifiedBoolKey] = true;
     }
 
-    const { error: updateError } = await supabase.from("users").update(updatePayload).eq("id", userIdForDbQuery(userId));
+    const { error: updateError } = await client.from("users").update(updatePayload).eq("id", userIdForDbQuery(userId));
     if (updateError) {
       return { ok: false, alreadyVerified: false, error: updateError.message || "Could not verify email.", code: "UNKNOWN" };
     }
@@ -455,6 +471,24 @@ export async function sendEmailVerificationMail(input: SendVerificationEmailInpu
       </p>
     </div>
   `.trim();
+
+  const hasResendKey = Boolean(process.env.RESEND_API_KEY?.trim());
+  const hasFrom = Boolean(process.env.AUTH_EMAIL_FROM?.trim());
+  if (!hasResendKey || !hasFrom) {
+    const missing = [
+      !hasResendKey ? "RESEND_API_KEY" : null,
+      !hasFrom ? "AUTH_EMAIL_FROM" : null,
+    ].filter(Boolean).join(", ");
+
+    if (process.env.NODE_ENV !== "production") {
+      // Dev-friendly fallback: don't block auth flows if email isn't configured.
+      // We still surface the link in logs so developers can complete verification.
+      console.warn(`[email] Verification email skipped (missing ${missing}). Link: ${input.verificationLink}`);
+      return { sent: true, error: null };
+    }
+
+    return { sent: false, error: `Email service is not configured (missing ${missing}).` };
+  }
 
   try {
     const resend = getResendClient();

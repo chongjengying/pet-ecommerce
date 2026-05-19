@@ -50,6 +50,9 @@ export async function createOrder(
     payment_provider?: string | null;
     payment_snapshot?: Record<string, unknown> | null;
     metadata?: Record<string, unknown> | null;
+    voucher_id?: number | null;
+    voucher_code?: string | null;
+    voucher_discount_amount?: number;
   }
 ): Promise<OrderRow> {
   const supabase = getSupabaseServerClient();
@@ -86,6 +89,9 @@ export async function createOrder(
     payment_provider?: string | null;
     payment_snapshot?: Record<string, unknown> | null;
     metadata?: Record<string, unknown> | null;
+    voucher_id?: number;
+    voucher_code?: string | null;
+    voucher_discount_amount?: number;
     user_id?: string | number;
   } = {
     subtotal,
@@ -149,6 +155,9 @@ export async function createOrder(
   if (options?.metadata != null) {
     orderPayload.metadata = options.metadata;
   }
+  if (options?.voucher_id != null) orderPayload.voucher_id = Number(options.voucher_id);
+  if (options?.voucher_code != null) orderPayload.voucher_code = options.voucher_code;
+  if (options?.voucher_discount_amount != null) orderPayload.voucher_discount_amount = Number(options.voucher_discount_amount);
 
   // Backward-compatible insert for environments where some newer columns
   // (e.g. metadata, notes) are not yet present in Supabase schema cache.
